@@ -1,0 +1,297 @@
+// =============================================================================
+// FILE: ui/app-window.slint
+// PURPOSE: WhatsApp-style chat interface with compact message bubbles,
+//          directional alignment (left=received, right=sent), and sender badges.
+// ARCHITECTURE: ScrollView message stack with conditional HorizontalLayout alignment,
+//               paired with a fixed-height bottom input dock.
+// ANDROID ANALOGY: RecyclerView using multiple ViewHolders (item_message_sent.xml vs
+//                  item_message_received.xml) or gravity="end" vs gravity="start".
+// =============================================================================
+
+import { Button, LineEdit, ListView } from "std-widgets.slint";
+
+// -----------------------------------------------------------------------------
+// ENUM: AppState
+// PURPOSE: Lifecycle state machine controlling Splash -> Chat -> Error transitions.
+// RUST GENERATION: Generates `pub enum AppState` in crate scope!
+// -----------------------------------------------------------------------------
+export enum AppState {
+    Booting,
+    Ready,
+    Failed,
+}
+
+// -----------------------------------------------------------------------------
+// DATA STRUCT: ChatMessage
+// PURPOSE: Strongly typed message record shared between Slint and Rust.
+// RUST GENERATION: Generates `pub struct ChatMessage` in your crate scope!
+// -----------------------------------------------------------------------------
+export struct ChatMessage {
+    text: string,
+    is-user: bool,       // true = sent by user (RIGHT), false = received (LEFT)
+    sender: string,      // e.g. "You", "AI Workflow", "System"
+    timestamp: string,   // e.g. "10:45 AM"
+}
+
+// -----------------------------------------------------------------------------
+// COMPONENT: ChatBubble
+// PURPOSE: Compact WhatsApp-style message card with contextual colors and tags.
+// -----------------------------------------------------------------------------
+component ChatBubble inherits Rectangle {
+    // Input properties for bubble state
+    in property <string> text;
+    in property <bool> is-user;
+    in property <string> sender;
+    in property <string> timestamp;
+
+    // Fixed width geometry requested by user:
+    // Guarantees a stable, comfortable reading width (320px)
+    // so short words like "hi" never collapse into a 10px-wide pillar!
+    width: 320px;
+
+    // Dynamic WhatsApp-style theme colors:
+    // User (Sent)     = WhatsApp Dark Teal (#005c4b) with border (#02735e)
+    // Other (Received) = Dark Surface Slate (#202c33) with border (#2a3942)
+    background: root.is-user ? #005c4b : #202c33;
+    border-color: root.is-user ? #02735e : #2a3942;
+    border-width: 1px;
+    border-radius: 10px;
+    clip: true;
+
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 6px;
+
+        // Header Row: Sender badge anchored to the left
+        HorizontalLayout {
+            alignment: start;
+
+            Text {
+                text: root.sender;
+                color: root.is-user ? #70e2b8 : #53bdeb; // Accent badge colors
+                font-size: 11px;
+                font-weight: 700;
+                horizontal-alignment: left;
+            }
+        }
+
+        // Body: Message content anchored to the left, wrapping height dynamically
+        Text {
+            text: root.text;
+            color: #e9edef;
+            font-size: 14px;
+            wrap: TextWrap.word-wrap;
+            horizontal-alignment: left;
+        }
+
+        // Footer Row: Timestamp aligned to the right inside the bubble
+        HorizontalLayout {
+            alignment: end;
+
+            Text {
+                text: root.timestamp;
+                color: #8696a0;
+                font-size: 10px;
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// COMPONENT: AppWindow (Main Window)
+// -----------------------------------------------------------------------------
+export component AppWindow inherits Window {
+    title: "AI Workflow GUI — WhatsApp-Style Chat";
+    min-width: 480px;
+    min-height: 450px;
+    preferred-width: 650px;
+    preferred-height: 550px;
+    background: #0b141a; // WhatsApp Dark Mode background canvas
+
+    // =========================================================================
+    // SLINT <-> RUST DATA CONTRACT
+    // =========================================================================
+
+    // 0. LIFECYCLE STATE: Controls Splash Screen -> Chat View transition
+    in-out property <AppState> app-state: AppState.Booting;
+    in property <string> boot-status: "Initializing Cold Wind AI Core...";
+    in property <string> boot-error: "";
+
+    // 1. DATA INFLOW (Rust -> Slint):
+    //    Collection of ChatMessage structs.
+    //    ORDERING INVARIANT: Index 0 is the newest message (top of stack).
+    in property <[ChatMessage]> messages: [
+        {
+            text: "Welcome to the AI Workflow console. Your message stack is live!",
+            is-user: false,
+            sender: "AI System",
+            timestamp: "10:30 AM"
+        },
+        {
+            text: "This is a sent message from you, aligned to the right side.",
+            is-user: true,
+            sender: "You",
+            timestamp: "10:31 AM"
+        },
+        {
+            text: "Received messages align to the left side with distinct colors.",
+            is-user: false,
+            sender: "AI Agent",
+            timestamp: "10:32 AM"
+        }
+    ];
+
+    // 2. BIDIRECTIONAL STATE: Input field text
+    in-out property <string> current-input: "";
+
+    // 3. ACTION OUTFLOW: Emitted on Send button click or Enter key
+    callback send-message();
+
+    // =========================================================================
+    // MAIN LAYOUT
+    // =========================================================================
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        // Top Status Header (WhatsApp style bar)
+        Rectangle {
+            vertical-stretch: 0;
+            height: 40px;
+            background: #202c33;
+            border-radius: 8px;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                alignment: space-between;
+
+                Text {
+                    text: "💬 Chat Session (Newest on Top)";
+                    color: #00a884;
+                    font-size: 13px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "🟢 Online";
+                    color: #8696a0;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // The Scrollable Chat Feed (Consumes all flexible height)
+        // Uses native ListView: never compresses item heights and scrolls smoothly!
+        ListView {
+            vertical-stretch: 1;
+
+            // Loop through messages: each row is a HorizontalLayout
+            // with padding and alignment to RIGHT (end) or LEFT (start).
+            for msg in root.messages: HorizontalLayout {
+                padding-top: 4px;
+                padding-bottom: 4px;
+                padding-left: 6px;
+                padding-right: 6px;
+                alignment: msg.is-user ? end : start;
+
+                ChatBubble {
+                    text: msg.text;
+                    is-user: msg.is-user;
+                    sender: msg.sender;
+                    timestamp: msg.timestamp;
+                }
+            }
+        }
+
+        // Bottom Input Dock (Pinned fixed height)
+        HorizontalLayout {
+            vertical-stretch: 0;
+            height: 44px;
+            spacing: 8px;
+
+            input-box := LineEdit {
+                text <=> root.current-input;
+                placeholder-text: "Type a message...";
+                accepted => {
+                    root.send-message();
+                }
+            }
+
+            send-btn := Button {
+                text: "Send";
+                primary: true;
+                width: 80px;
+                clicked => {
+                    root.send-message();
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // OVERLAYS: Splash Screen & Boot Error Handlers
+    // =========================================================================
+
+    // Splash Screen Overlay (Visible while app-state == Booting)
+    if root.app-state == AppState.Booting : Rectangle {
+        background: #0b141a; // Covers main chat view completely
+        width: 100%;
+        height: 100%;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 16px;
+
+            Text {
+                text: "❄️ Cold Wind AI";
+                font-size: 26px;
+                font-weight: 700;
+                color: #00a884;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: root.boot-status;
+                font-size: 13px;
+                color: #8696a0;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    // Error Screen Overlay (Visible if app-state == Failed)
+    if root.app-state == AppState.Failed : Rectangle {
+        background: #1a0b0b;
+        width: 100%;
+        height: 100%;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 14px;
+            padding-left: 20px;
+            padding-right: 20px;
+
+            Text {
+                text: "❌ Core Boot Failed";
+                font-size: 22px;
+                font-weight: 700;
+                color: #ea4335;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: root.boot-error;
+                font-size: 13px;
+                color: #e9edef;
+                horizontal-alignment: center;
+                wrap: TextWrap.word-wrap;
+            }
+        }
+    }
+}
