@@ -1,0 +1,30 @@
+[package]
+name = "ai-workflow-gui"
+version = "0.1.0"
+edition = "2024"
+
+build = "build.rs"
+
+[dependencies]
+
+slint = "1.16.0"
+time-format = "1.2.4"
+
+# When the auto-initialize feature is active: 
+# PyO3 wraps Python::with_gil with an internal check: "Is CPython running?"
+# If no, PyO3 automatically calls pyo3::prepare_freethreaded_python() for you before acquiring the lock.
+pyo3 = { version = "0.30.1", features = ["auto-initialize"] }
+
+
+toml = "1.1.8"
+serde = {version = "1.0.229", features = ["derive"]}
+
+[build-dependencies]
+slint-build = "1.16.0"
+
+# develop test binary 
+#
+# [[bin]]
+# name = "te"
+# path = "tests/load_core_boot.rs"
+

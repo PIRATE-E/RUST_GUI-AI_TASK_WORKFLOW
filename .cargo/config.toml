@@ -1,0 +1,8 @@
+## pyO3 natively reads that up during the building the target binary !!
+
+[env]
+# Used by pyo3-build-config at compile time to link libpython
+PYO3_PYTHON = "/home/pirate/development/ai-workflow-task-agent/.venv/bin/python"
+ 
+# Used by your Rust code via env!("COLDWIND_VENV") to locate site-packages
+COLDWIND_VENV = "/home/pirate/development/ai-workflow-task-agent/.venv"
