@@ -1,9 +1,209 @@
+use core::fmt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, RecvError, SyncSender, TryRecvError};
 use time_format::{now, strftime_local};
+
+// consolidate state machine which is state full fields of one ticket loop only !!
+#[derive(Debug, Clone)]
+pub struct TicketUiState {
+    pub ticket_id: String,
+    pub task_id: i32,             // represent current task on that second !!
+    pub total_tasks: i32,         // Total tasks planned for this workflow
+    pub rpm_count: i32,           // Sliding 1-min RPM limit tracker
+    pub total_requests: i32,      // Monotonic turn lifetime counter of requests e.g 300 requests
+    pub failed_count: i32,        // Recorded failure counter
+    pub current_headline: String, // Active user-facing status description
+}
+
+impl Default for TicketUiState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TicketUiState {
+    pub fn new() -> Self {
+        Self {
+            // ticket id is sentinel here we didnt reqyest ticket id from rust native code instead
+            // we parse it from the logs and maintain internally for validations rust already wrote
+            // the ticket_id to the required component !!
+            ticket_id: String::new(),
+            task_id: 1,
+            total_tasks: 0,
+            rpm_count: 0,
+            total_requests: 0,
+            failed_count: 0,
+            current_headline: "Initializing workflow...".to_string(),
+        }
+    }
+
+    // WHAT: Resets all turn-scoped telemetry accumulators when a new ticket turn begins.
+    // WHY: In DesktopStatusHandler, each turn starts with fresh counters (0 requests, 0 failures, 1 task).
+    //      Without resetting, monotonic total_requests would leak from Turn 1 into Turn 2.
+    pub fn reset(&mut self, new_ticket_id: String) {
+        self.ticket_id = new_ticket_id;
+        self.task_id = 1;
+        self.total_tasks = 0;
+        self.rpm_count = 0;
+        self.total_requests = 0;
+        self.failed_count = 0;
+        self.current_headline = "Initializing workflow...".to_string();
+    }
+
+    /// Helper to format the task progress pill (e.g. "Task [2/5]")
+    #[inline]
+    pub fn task_progress(&self) -> String {
+        if self.total_tasks >= 1 {
+            format!("Task [{}/{}]", self.task_id, self.total_tasks)
+        } else {
+            "Task [0/0]".to_string()
+        }
+    }
+
+    /// Curates telemetry from incoming Core LogEntry deltas.
+    /// Parities DesktopStatusHandler.handle() 1:1.
+    pub fn parse_log(&mut self, log: &LogEntry) {
+        let mut had_explicit_failures = false;
+
+        // =====================================================================
+        // 1. INGEST TELEMETRY COUNTERS FROM METADATA
+        // =====================================================================
+        if let Some(MetaData::Dict(map)) = log.metadata.as_ref() {
+            // WHAT: Latch canonical ticket_id from metadata (e.g. from TICKET • START).
+            // WHY: Automatically synchronizes Thread 3 with the host platform's canonical ticket_id
+            //      and resets accumulators for the new turn without manual inter-thread signaling.
+            // ANDROID/PYTHON BRIDGE: Equivalent to updating active turn tag when a new Intent arrives.
+            if let Some(tid) = map.get("ticket_id").and_then(|m| m.as_str()) {
+                if !tid.is_empty() && tid != self.ticket_id {
+                    self.reset(tid.to_string());
+                }
+            }
+
+            // Task ID
+            if let Some(id) = map.get("task_id").and_then(|m| m.as_i32()) {
+                self.task_id = id;
+            }
+
+            // Total Tasks (standardized: total_tasks, fallback: task_count, delta: subtasks_created)
+            if let Some(total) = map
+                .get("total_tasks")
+                .or_else(|| map.get("task_count"))
+                .and_then(|m| m.as_i32())
+            {
+                self.total_tasks = total;
+            } else if let Some(delta) = map.get("subtasks_created").and_then(|m| m.as_i32()) {
+                self.total_tasks += delta;
+            }
+
+            // Dual API Counters:
+            // (a) RPM sliding window (rpm_count -> requests_count -> api_calls)
+            if let Some(rpm) = map
+                .get("rpm_count")
+                .or_else(|| map.get("requests_count"))
+                .or_else(|| map.get("api_calls"))
+                .and_then(|m| m.as_i32())
+            {
+                self.rpm_count = rpm;
+            }
+
+            // (b) Monotonic turn total requests
+            // B. STRICTLY MONOTONIC Total Requests (Never decreases or drops behind!)
+            if let Some(total_req) = map.get("total_requests").and_then(|m| m.as_i32()) {
+                if total_req > self.total_requests {
+                    self.total_requests = total_req;
+                }
+            }
+
+            // Failure counter
+            if let Some(fails) = map
+                .get("failure_count")
+                .or_else(|| map.get("failed_count"))
+                .and_then(|m| m.as_i32())
+            {
+                self.failed_count = fails;
+                had_explicit_failures = true;
+            }
+        }
+
+        // Global fallback: Count ERROR / CRITICAL logs if not explicitly tracked in metadata
+        if !had_explicit_failures {
+            if (log.log_level == LogLevel::ERROR || log.log_level == LogLevel::CRITICAL)
+                && log.message.contains("API")
+            {
+                self.failed_count += 1;
+            }
+        }
+
+        // =====================================================================
+        // 2. STATUS PRIORITY HIERARCHY (USER-FACING HEADLINE CURATION) Parse using own platform
+        //    headline generator !!
+        // =====================================================================
+        let (heading, _body) = if let Some((h, b)) = log.message.split_once(" | ") {
+            (h.trim().to_uppercase(), b.trim())
+        } else {
+            (log.message.trim().to_uppercase(), log.message.trim())
+        };
+
+        // Priority 1: Drop internal raw API network noise from headline
+        if heading.contains("REQUEST_PROGRESS") || heading.contains("API_CALL_COMPLETED") {
+            return;
+        }
+
+        // Priority 2: Extract category & tool_name from metadata if present
+        let (category, tool_name) = if let Some(MetaData::Dict(map)) = log.metadata.as_ref() {
+            (
+                map.get("category").and_then(|m| m.as_str()),
+                map.get("tool_name").and_then(|m| m.as_str()),
+            )
+        } else {
+            (None, None)
+        };
+
+        // Priority 3: Resolve active AgentPhase from log metadata and heading
+        // WHAT: Classifies incoming Core milestone into clean AgentPhase enum
+        // WHY: Works whether Core uses modern category tags or legacy heading strings
+        // ANDROID/PYTHON BRIDGE: Equivalent to a Kotlin `when (intent.action)` block
+        let phase = if heading.contains("TOOL • EXECUTION")
+            || log.log_type == LogCategory::ToolExecution
+        {
+            Some(status_quote_engine::AgentPhase::ToolExecution)
+        } else if heading.contains("INITIAL_PLANNER")
+            || category == Some("initial_planning")
+            || category == Some("complexity_analysis")
+            || category == Some("task_planning")
+        {
+            Some(status_quote_engine::AgentPhase::InitialPlanning)
+        } else if heading.contains("FINALIZER") || category == Some("finalizing") {
+            Some(status_quote_engine::AgentPhase::Finalizing)
+        } else if heading.contains("TASK_EXECUTOR")
+            || heading.contains("AGENT • STATUS")
+            || heading == "STATUS"
+            || category == Some("task_execution")
+            || category == Some("parameter_generation")
+        {
+            Some(status_quote_engine::AgentPhase::TaskExecution)
+        } else if heading.contains("ERROR") || category == Some("error_recovery") {
+            Some(status_quote_engine::AgentPhase::ErrorRecovery)
+        } else {
+            None
+        };
+
+        // Priority 4: Generate indigenous quote using local StatusQuotesEngine
+        if let Some(agent_phase) = phase {
+            // Seed with total_requests so quotes rotate dynamically across steps
+            let seed = (self.total_requests.max(self.task_id)) as u32;
+            self.current_headline = status_quote_engine::StatusQuotesEngine::generate(
+                agent_phase,
+                Some(self.task_id),
+                tool_name,
+                seed,
+            );
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogLevel {
@@ -12,6 +212,18 @@ pub enum LogLevel {
     WARNING,
     INFO,
     CRITICAL,
+}
+
+impl LogLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogLevel::DEBUG => "DEBUG",
+            LogLevel::INFO => "INFO",
+            LogLevel::WARNING => "WARNING",
+            LogLevel::ERROR => "ERROR",
+            LogLevel::CRITICAL => "CRITICAL",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +236,22 @@ pub enum LogCategory {
     OTHER,
 }
 
+impl LogCategory {
+    // if we required the str representation of every variances !
+
+    #[inline]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogCategory::ApiCall => "API_CALL",
+            LogCategory::ToolExecution => "TOOL_EXECUTION",
+            LogCategory::AgentWorkflow => "AGENT_WORKFLOW",
+            LogCategory::McpServer => "MCP_SERVER",
+            LogCategory::ErrorTraceback => "ERROR_TRACEBACK",
+            LogCategory::OTHER => "OTHER",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaData {
     // If there is no metadata direct map it to Option::None
@@ -34,6 +262,69 @@ pub enum MetaData {
     String(String),
     List(Vec<MetaData>),
     Dict(HashMap<String, MetaData>),
+}
+
+impl MetaData {
+    /// instead of having From trait i would be use helper methods !!
+    /// because from traits could not be failed and i dont bother to right and match against each
+    /// TryFrom permutation combination against MetaData's variances
+    ///
+    /// Ergonomic extractor for integer values (handles i64, float, and string int)
+    pub fn as_i32(&self) -> Option<i32> {
+        match self {
+            MetaData::Integer(v) => Some(*v as i32),
+            MetaData::Float(v) => Some(*v as i32),
+            MetaData::String(s) => s.parse::<i32>().ok(),
+            _ => None,
+        }
+    }
+
+    /// Ergonomic extractor for string slices
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            MetaData::String(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+}
+
+// we need Recursive string representation for meta data !!
+
+impl fmt::Display for MetaData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetaData::String(s) => f.write_str(s),
+            MetaData::Integer(i) => write!(f, "{i}"),
+            MetaData::Float(fl) => write!(f, "{fl:.1}"),
+            MetaData::Bool(b) => write!(f, "{b}"),
+            MetaData::List(list) => {
+                f.write_str("[")?;
+                for (idx, item) in list.iter().enumerate() {
+                    if idx > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{item}")?; // Recursive zero-alloc write!
+                }
+                if list.len() > 3 {
+                    f.write_str(", …")?;
+                }
+                f.write_str("]")
+            }
+            MetaData::Dict(map) => {
+                f.write_str("{")?;
+                for (idx, (k, v)) in map.iter().enumerate() {
+                    if idx > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{k}: {v}")?; // Recursive zero-alloc write!
+                }
+                if map.len() > 3 {
+                    f.write_str(", …")?;
+                }
+                f.write_str("}")
+            }
+        }
+    }
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for MetaData {
@@ -233,3 +524,4 @@ pub fn init_sync_send_all() -> ReceiverLogEntry {
 pub mod load_python;
 pub mod log_entry_handler;
 pub mod slint_py_engine;
+pub mod status_quote_engine;

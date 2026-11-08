@@ -9,8 +9,8 @@
 
 use std::sync::OnceLock;
 
+use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use pyo3::{IntoPyObjectExt, prelude::*};
 use pyo3::{Py, PyAny, PyResult, Python, types::PyAnyMethods};
 use std::time::Instant;
 // runtime objects and cached objects to pass over whole loop of process ticket !!
@@ -31,7 +31,7 @@ pub struct SlintRuntime {
     /// Session identifier & monotonic turn counter for unique `ticket_id` generation
     pub session_id: String,
     pub user_id: String,
-    pub turn_counter: u64,
+    pub turn_counter: u64, // monotonic turn counter of this session how many ticckets got send
 }
 
 // all the registered tools meta data to show them in different sliding window drawer component !!
@@ -52,6 +52,8 @@ pub struct TicketOutResult {
     pub status: String,                // "COMPLETED" | "FAILED" | "TIMED_OUT"
     pub transcript: String,            // Final AI response text
     pub latency_ms: f64,               // Turn execution time from TicketOut.usage
+    pub rpm_count: u32,                // Rolling RPM rate-limit window from TicketOut.usage
+    pub total_requests: u32,           // Turn total requests from TicketOut.usage
     pub error_message: Option<String>, // if status == "FAILED" so their would be error detail
     pub is_exiting: bool,              // user passed slash command (exit)?
 }
@@ -76,7 +78,11 @@ impl SlintRuntime {
         // extract registered tools and cached them to passed over in the ticket
         // for the process ticket !
 
-        let mut allowed_py_list_name = PyList::empty(py);
+        // WHAT: Immutable Bound<'py, PyList> reference populated via append(&name_py).
+        // WHY: In PyO3 0.26+, PyList::append operates via internal mutability on the Python object heap,
+        //      so the Rust binding does NOT need `mut`.
+        // ANDROID/PYTHON BRIDGE: Equivalent to `final ArrayList<String> list = new ArrayList<>(); list.add(...)`.
+        let allowed_py_list_name = PyList::empty(py);
         let mut allowed_rs_vec_name_n_desc = Vec::<ToolMetadata>::new();
         // grab the self.tools from the engine !!
         let tools_attr = engine.bind(py).getattr("tools")?;
@@ -120,18 +126,28 @@ impl SlintRuntime {
         &mut self,
         py: Python<'py>,
         user_message: &str,
+        ticket_id: &str,
+        // WHAT: Session turn sequence counter deliberately preserved for upcoming core multi-session protocol.
+        // WHY: Prefixed with underscore `_turn_counter` to silence unused variable warnings while preserving API contract.
+        // ANDROID/PYTHON BRIDGE: Equivalent to an Android Intent extra or request sequence tag preserved for telemetry.
+        _turn_counter: u32,
         timeout_sec: u32,
     ) -> PyResult<TicketOutResult> {
         let start_time = Instant::now();
         let user_message = user_message.trim();
+        // included turn counter to be present here for future developments currently it is
+        // redundant !!
+        // we already got increased turn counter from platform !!
         if user_message.is_empty() {
             return Ok(TicketOutResult {
-                ticket_id: "dev-null".to_string(),
-                status: "COMPLETED".to_string(),
+                ticket_id: ticket_id.into(),
                 transcript: String::new(),
+                status: "COMPLETED".to_string(),
                 latency_ms: start_time.elapsed().as_millis() as f64,
                 error_message: None,
                 is_exiting: false,
+                rpm_count: 0,
+                total_requests: 0,
             });
         };
 
@@ -143,12 +159,14 @@ impl SlintRuntime {
         ) {
             // self.request_exit(py)?;
             return Ok(TicketOutResult {
-                ticket_id: "exit-cmd".to_string(),
+                ticket_id: ticket_id.into(),
                 status: "COMPLETED".to_string(),
                 transcript: "Exiting Cold Wind AI. Goodbye!".to_string(),
                 latency_ms: start_time.elapsed().as_millis() as f64,
                 error_message: None,
                 is_exiting: true,
+                rpm_count: 0,
+                total_requests: 0,
             });
         }
 
@@ -157,17 +175,16 @@ impl SlintRuntime {
         if user_message.eq_ignore_ascii_case("/clear") {
             // self.clear_session(py)?;
             return Ok(TicketOutResult {
-                ticket_id: "clear-cmd".to_string(),
+                ticket_id: ticket_id.into(),
                 status: "COMPLETED".to_string(),
                 transcript: "Chat history cleared.".to_string(),
                 latency_ms: start_time.elapsed().as_millis() as f64,
                 error_message: None,
                 is_exiting: false,
+                rpm_count: 0,
+                total_requests: 0,
             });
         }
-
-        self.turn_counter += 1;
-        let ticket_id = format!("slint-{:04}", self.turn_counter);
 
         // Step 2.1: Emit user message to `context.get_message_display().display_message("user", ...)`
         if let Ok(display) = self
@@ -183,7 +200,7 @@ impl SlintRuntime {
         limits_dict.set_item("timeout_seconds", timeout_sec)?;
 
         let kwargs = PyDict::new(py);
-        kwargs.set_item("ticket_id", &ticket_id)?;
+        kwargs.set_item("ticket_id", ticket_id)?;
         kwargs.set_item("session_id", &self.session_id)?;
         kwargs.set_item("user_id", &self.user_id)?;
         kwargs.set_item("user_message", user_message)?;
@@ -217,6 +234,20 @@ impl SlintRuntime {
             }
         }
 
+        // extract 'rpm_count' and 'total_requests' from the ticket_out.usage dictionary if present
+        let mut rpm_count: u32 = 0;
+        let mut total_requests: u32 = 0;
+        if let Ok(usage_any) = ticket_out.getattr("usage") {
+            if let Ok(usage_dict) = usage_any.cast::<PyDict>() {
+                if let Ok(Some(rpm_val)) = usage_dict.get_item("rpm_count") {
+                    rpm_count = rpm_val.extract::<u32>().unwrap_or(0);
+                }
+                if let Ok(Some(total_req_val)) = usage_dict.get_item("total_requests") {
+                    total_requests = total_req_val.extract::<u32>().unwrap_or(0);
+                }
+            }
+        }
+
         // Step 2.5: Check status & update `self.session_state` pointer on success
         if status == "COMPLETED" {
             let new_state = ticket_out.getattr("new_working_state")?;
@@ -224,12 +255,14 @@ impl SlintRuntime {
             self.session_state = new_state.unbind();
 
             Ok(TicketOutResult {
-                ticket_id,
+                ticket_id: ticket_id.into(),
                 status,
                 transcript,
                 latency_ms,
                 error_message: None,
                 is_exiting: false,
+                rpm_count,
+                total_requests,
             })
         } else {
             // Turn failed (`status == "FAILED"` or `"TIMED_OUT"`): extract `error_info`
@@ -250,12 +283,14 @@ impl SlintRuntime {
             }
 
             Ok(TicketOutResult {
-                ticket_id,
+                ticket_id: ticket_id.into(),
                 status,
                 transcript,
                 latency_ms,
                 error_message: Some(err_msg),
                 is_exiting: false,
+                rpm_count,
+                total_requests,
             })
         }
     }

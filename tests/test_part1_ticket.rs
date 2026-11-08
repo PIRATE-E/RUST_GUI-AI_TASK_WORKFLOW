@@ -51,7 +51,10 @@ fn test_part1_ticket_turn() -> PyResult<()> {
         let mut runtime = SlintRuntime::boot(py)?;
 
         // 5. Submit an end-to-end ticket turn (/help command)
-        let result = runtime.process_ticket(py, "/help", 30)?;
+        // WHAT: Pass canonical ticket_id and turn_counter matching process_ticket's updated 5-argument signature.
+        // WHY: Adheres to Platform Sovereignty where Rust generates the ticket_id and turn count.
+        // ANDROID/PYTHON BRIDGE: Equivalent to passing request_id and attempt_count in Retrofit / OkHttp request headers.
+        let result = runtime.process_ticket(py, "/help", "test-0001", 1, 30)?;
 
         println!("[test_part1_ticket_turn] Turn Status: {}", result.status);
         println!("[test_part1_ticket_turn] Transcript: {}", result.transcript);
