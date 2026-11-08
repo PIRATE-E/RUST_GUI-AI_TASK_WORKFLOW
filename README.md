@@ -435,6 +435,7 @@ All architectural studies and learning notes are maintained in [`reports/`](file
 | **Domain 1** | [`reports/cross-platform-docs/`](file:///home/pirate/development/ai-workflow-gui/reports/cross-platform-docs/) | PyO3 0.26+ FFI mechanics, GIL lifecycles, and dual-thread concurrency rules |
 | **Domain 2** | [`reports/slint_active/`](file:///home/pirate/development/ai-workflow-gui/reports/slint_active/) | Slint WhatsApp bubble styling, component hierarchies, and reactive property bindings |
 | **Domain 6** | [`reports/test_harness/`](file:///home/pirate/development/ai-workflow-gui/reports/test_harness/) | 4-tier integration test pyramid deep-dives and verification logs |
+| **Domain 7** | [`reports/urgent_development/`](file:///home/pirate/development/ai-workflow-gui/reports/urgent_development/) | Forensic gap audits, concurrency deadlock remediation, and telemetry UX parity blueprints |
 
 ---
 

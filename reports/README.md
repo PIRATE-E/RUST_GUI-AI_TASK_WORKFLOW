@@ -15,6 +15,8 @@
 | 4 | Active UI Reports | [`slint_active/`](slint_active/README.md) | 🟢 Active | 4 |
 | 5 | Cross-Platform PyO3 & Slint Bridge | [`cross-platform-docs/`](cross-platform-docs/README.md) | 🟡 Active (Stage 1.2) | 19 |
 | 6 | Test Harness & Verification Suite | [`test_harness/`](test_harness/README.md) | 🟢 Active | 3 |
+| 7 | Urgent Development & Parity Audits | [`urgent_development/`](urgent_development/README.md) | 🟢 Active | 4 |
+| 8 | Codebase Architecture & File Explanations | [`docs/`](docs/README.md) | 🟢 Active | 12 |
 
 ---
 

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Workflow Timeline Inspector</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.92); }
+    }
+    .pulse-dot {
+      animation: pulse-subtle 1.2s infinite ease-in-out;
+    }
+    @keyframes shimmer-sweep {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .shimmer-bg {
+      background: linear-gradient(90deg, #161d2b 25%, #232d42 50%, #161d2b 75%);
+      background-size: 200% 100%;
+      animation: shimmer-sweep 2s infinite ease-in-out;
+    }
+    /* Custom scrollbar for clean UI */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b0f17; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+  </style>
+</head>
+<body class="bg-[#0b0f17] text-slate-200 font-sans h-screen flex overflow-hidden antialiased selection:bg-indigo-500 selection:text-white relative">
+
+  <!-- Backdrop Blur & Focus Lock when 75% Drawer is Open -->
+  <div id="focus-backdrop" onclick="closeDrawer()" class="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-30 opacity-0 pointer-events-none transition-opacity duration-300"></div>
+
+  <!-- Main Chat Workspace -->
+  <main id="main-workspace" class="flex-1 flex flex-col h-full relative z-10 transition-all duration-300 ease-out">
+    <!-- Top Bar -->
+    <header class="h-14 border-b border-slate-800/80 bg-[#111622] px-6 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-3">
+        <span class="w-2.5 h-2.5 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1]"></span>
+        <h1 class="text-sm font-semibold tracking-wide text-slate-100">Rust Slint GUI &bull; LangGraph Agent</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-mono text-slate-400 bg-slate-900/90 border border-slate-800 px-3 py-1 rounded-full">
+          Session API Calls: <strong id="global-api-count" class="text-indigo-400">7</strong>
+        </span>
+      </div>
+    </header>
+
+    <!-- Chat Messages Scroll View -->
+    <div id="chat-stream" class="flex-1 overflow-y-auto p-6 space-y-8 max-w-4xl mx-auto w-full">
+      
+      <!-- ================= TURN #1 (COMPLETED TEXTURE) ================= -->
+      <div class="space-y-4">
+        <!-- User Message Bubble -->
+        <div class="flex flex-col items-end gap-1.5 max-w-xl ml-auto">
+          <span class="text-[11px] font-mono text-slate-500">User &bull; Turn #1 &bull; 10:41 AM</span>
+          <div class="bg-indigo-600 text-white px-4 py-3 rounded-2xl rounded-br-xs text-sm shadow-md leading-relaxed">
+            Check if our PyO3 bindings declare correct memory lifecycles for dynamic queries.
+          </div>
+        </div>
+
+        <!-- AI Response Bubble (Slide Button Integrated Directly Inside the Bubble) -->
+        <div class="max-w-2xl mr-auto w-full">
+          <div class="bg-[#121824] border border-slate-800/90 rounded-2xl rounded-bl-xs p-4 text-sm space-y-3 shadow-md">
+            
+            <!-- Embedded Summary Pill + Inside Minimal Slide Button (|>) -->
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800/90 pl-3 pr-1.5 py-1.5 rounded-xl text-[11px] font-mono text-slate-400">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span class="text-emerald-400 font-semibold">Task [3/3]</span>
+                <span>&bull;</span>
+                <span>API Req: <strong class="text-slate-200">3</strong></span>
+                <span>&bull;</span>
+                <span>0 Failed</span>
+                <span class="text-slate-600 hidden sm:inline">&bull;</span>
+                <span class="text-slate-500 hidden sm:inline">1.42s</span>
+              </div>
+
+              <!-- Clean Minimalist "|>" Slide Button Inside the Bubble -->
+              <button onclick="openDrawer('turn-1')" 
+                      title="Click to see whole log graph"
+                      class="group/slide flex items-center gap-1.5 bg-slate-800/90 hover:bg-indigo-600 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg border border-slate-700/80 hover:border-indigo-400 transition-all duration-200 cursor-pointer shrink-0">
+                <span class="font-mono font-bold tracking-tighter text-indigo-400 group-hover/slide:text-white transition-colors">
+                  |&gt;
+                </span>
+                <span class="max-w-0 overflow-hidden group-hover/slide:max-w-[140px] opacity-0 group-hover/slide:opacity-100 transition-all duration-200 whitespace-nowrap text-[11px] font-medium">
+                  See whole log graph
+                </span>
+              </button>
+            </div>
+
+            <!-- Final Synthesized Output -->
+            <p class="text-slate-200 leading-relaxed">
+              The bindings use standard <code class="font-mono text-indigo-300 bg-slate-900 px-1.5 py-0.5 rounded text-xs">Python::with_gil</code> scope guards. All dynamic query objects are safely bound to Rust lifetimes without manual reference-count leaks.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= TURN #2 (ACTIVE / IN-FLIGHT TEXTURE) ================= -->
+      <div class="space-y-4">
+        <!-- User Message Bubble -->
+        <div class="flex flex-col items-end gap-1.5 max-w-xl ml-auto">
+          <span class="text-[11px] font-mono text-slate-500">User &bull; Turn #2 &bull; Just now</span>
+          <div class="bg-indigo-600 text-white px-4 py-3 rounded-2xl rounded-br-xs text-sm shadow-md leading-relaxed">
+            Analyze AST symbols and resolve dependencies across the local Python workspace.
+          </div>
+        </div>
+
+        <!-- In-Flight Sentinel Bubble (With Integrated "|>" Slide Button Inside) -->
+        <div class="max-w-2xl mr-auto w-full">
+          <div id="turn2-card" class="bg-[#131b29] border border-indigo-500/40 rounded-2xl rounded-bl-xs p-4 text-sm space-y-3 shadow-[0_0_25px_rgba(99,102,241,0.08)] transition-all">
+            
+            <!-- Placeholder Curated Summary Bar + Integrated "|>" Slide Trigger -->
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 border border-indigo-900/60 pl-3 pr-1.5 py-1.5 rounded-xl text-xs font-mono">
+              <div class="flex flex-wrap items-center gap-2">
+                <span id="turn2-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 pulse-dot"></span>
+                <span id="turn2-task-count" class="text-indigo-300 font-semibold">Task [2/4]</span>
+                <span class="text-slate-600">&bull;</span>
+                <span class="text-slate-300">API Req: <strong id="turn2-api-req" class="text-amber-300">4</strong></span>
+                <span class="text-slate-600">&bull;</span>
+                <span class="text-emerald-400/90">0 Failed</span>
+                <span class="text-slate-600">&bull;</span>
+                <span id="turn2-summary-line" class="text-amber-300/90 truncate max-w-[180px] sm:max-w-[210px]">
+                  ast_analyzer: parsing tree...
+                </span>
+              </div>
+
+              <!-- Clean Minimalist "|>" Slide Button Inside the Bubble -->
+              <button onclick="openDrawer('turn-2')" 
+                      title="Click to see whole log graph"
+                      class="group/slide flex items-center gap-1.5 bg-indigo-950/90 hover:bg-indigo-600 text-indigo-200 hover:text-white px-2.5 py-1 rounded-lg border border-indigo-500/50 hover:border-indigo-400 transition-all duration-200 cursor-pointer shrink-0 shadow-sm">
+                <span class="font-mono font-bold tracking-tighter text-indigo-300 group-hover/slide:text-white transition-colors">
+                  |&gt;
+                </span>
+                <span class="max-w-0 overflow-hidden group-hover/slide:max-w-[140px] opacity-0 group-hover/slide:opacity-100 transition-all duration-200 whitespace-nowrap text-[11px] font-medium">
+                  See whole log graph
+                </span>
+              </button>
+            </div>
+
+            <!-- Sentinel Shimmer Animation / Final Output Slot -->
+            <div id="turn2-body">
+              <div class="shimmer-bg h-16 rounded-xl flex items-center justify-between px-4 border border-slate-700/50">
+                <span class="text-xs text-slate-300 flex items-center gap-2.5 font-mono">
+                  <svg class="animate-spin h-4 w-4 text-indigo-400 shrink-0" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8z"></path>
+                  </svg>
+                  <span>Agent executing workflow nodes... waiting for final synthesis</span>
+                </span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom Input Bar (Disabled while Agent is running OR when 75% Slide Window is open) -->
+    <div class="p-4 border-t border-slate-800/80 bg-[#111622]">
+      <div class="flex gap-3 max-w-3xl mx-auto items-center">
+        <div class="flex-1 relative">
+          <input id="chat-input" disabled type="text" 
+                 placeholder="Agent workflow in progress — input locked until completion..." 
+                 class="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-400 focus:outline-none cursor-not-allowed transition">
+        </div>
+        <button id="chat-send-btn" disabled class="bg-slate-800 text-slate-500 px-5 py-3 rounded-xl text-sm font-semibold cursor-not-allowed transition">
+          Send Prompt
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 75% SLIDE-IN ZOOM WINDOW (COVERS 75% OF SCREEN, SHIFTS FOCUS COMPLETELY) -->
+  <!-- ========================================================================= -->
+  <aside id="inspector-drawer" class="fixed top-0 right-0 h-full w-full md:w-[75%] bg-[#0e131f] border-l border-indigo-500/30 shadow-[-20px_0_50px_rgba(0,0,0,0.75)] transform translate-x-full transition-transform duration-300 ease-out z-40 flex flex-col">
+    
+    <!-- Slide Window Top Header -->
+    <div class="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-[#131a29] shrink-0">
+      <div class="flex items-center gap-3">
+        <!-- Collapse Sidebar Symbol -->
+        <button onclick="closeDrawer()" title="Collapse panel" class="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2"></rect>
+            <line x1="15" y1="3" x2="15" y2="21" stroke-width="2"></line>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3"></path>
+          </svg>
+        </button>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">Zoomed Task Context</span>
+            <span id="drawer-status-badge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              LIVE STREAMING
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Demo Controls to test In-Progress vs Completed Texture -->
+      <div class="flex items-center gap-2">
+        <button id="sim-step-btn" onclick="advanceWorkflowSimulation()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs px-3 py-1.5 rounded-lg shadow transition flex items-center gap-1.5">
+          <span>+ Emit Next Agent Log</span>
+        </button>
+        <button onclick="closeDrawer()" class="text-slate-400 hover:text-white font-mono text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
+          Back to Chat [Esc]
+        </button>
+      </div>
+    </div>
+
+    <!-- Zoomed Task Execution Tree Canvas -->
+    <div class="flex-1 overflow-y-auto p-6 md:p-10">
+      <div class="max-w-3xl mx-auto">
+
+        <!-- 1. TOP CONTEXT ANCHOR: REPEATED USER MESSAGE BUBBLE -->
+        <div class="flex flex-col items-start">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="px-2 py-0.5 text-[10px] font-mono font-bold uppercase bg-indigo-600 text-white rounded">Origin User Prompt</span>
+            <span id="drawer-turn-label" class="text-xs font-mono text-slate-400">Turn #2 &bull; Context Anchor</span>
+          </div>
+          <div class="w-full bg-indigo-600/20 border-2 border-indigo-500/60 text-slate-100 p-4 rounded-2xl rounded-tl-xs shadow-lg">
+            <p id="drawer-user-prompt" class="text-sm md:text-base font-medium leading-relaxed"></p>
+          </div>
+        </div>
+
+        <!-- 2. VERTICAL TREE CONNECTOR & SEQUENTIAL LOG BUBBLES -->
+        <div id="drawer-tree-stream" class=" flex flex-col items-start pl-6 md:pl-10">
+          <!-- Populated dynamically via JS based on selected turn and state -->
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Drawer Bottom Telemetry Bar -->
+    <div class="h-12 border-t border-slate-800 bg-[#131a29] px-6 flex items-center justify-between text-xs font-mono text-slate-400 shrink-0">
+      <div class="flex items-center gap-4">
+        <span>Focus Mode: <strong class="text-slate-200">75% Viewport Lock</strong></span>
+        <span>&bull;</span>
+        <span id="drawer-footer-metrics">Tasks: 2/4 | API Calls: 4 | Failures: 0</span>
+      </div>
+      <span class="text-slate-500">Main chat input disabled while inspecting</span>
+    </div>
+  </aside>
+
+  <script>
+    const drawer = document.getElementById('inspector-drawer');
+    const backdrop = document.getElementById('focus-backdrop');
+    const mainWorkspace = document.getElementById('main-workspace');
+    const treeStream = document.getElementById('drawer-tree-stream');
+    const drawerPrompt = document.getElementById('drawer-user-prompt');
+    const drawerTurnLabel = document.getElementById('drawer-turn-label');
+    const drawerStatusBadge = document.getElementById('drawer-status-badge');
+    const drawerFooterMetrics = document.getElementById('drawer-footer-metrics');
+    const simStepBtn = document.getElementById('sim-step-btn');
+
+    let currentOpenTurn = null;
+
+    // Structured State for Turn 1 (Completed) & Turn 2 (Live / Interactive)
+    const workflowState = {
+      'turn-1': {
+        turnLabel: 'Turn #1 • Completed History',
+        prompt: 'Check if our PyO3 bindings declare correct memory lifecycles for dynamic queries.',
+        completed: true,
+        tasksDone: 3,
+        tasksTotal: 3,
+        apiReq: 3,
+        failures: 0,
+        logs: [
+          {
+            id: 'Log #1',
+            node: 'manifest_inspector',
+            time: '+110ms',
+            apiCalls: 1,
+            status: 'done',
+            summary: 'Scanned Cargo.toml and verified pyo3 = { version = "0.21", features = ["auto-initialize"] }.',
+            payload: '{ "crate": "gui_bridge", "pyo3_features": ["auto-initialize"] }'
+          },
+          {
+            id: 'Log #2',
+            node: 'ast_lifetime_analyzer',
+            time: '+490ms',
+            apiCalls: 1,
+            status: 'done',
+            summary: 'Checked 6 #[pyfunction] exports. Confirmed bound PyAny references do not escape GIL scope.',
+            payload: '{ "checked_fns": 6, "lifetime_leaks": 0 }'
+          },
+          {
+            id: 'Log #3',
+            node: 'response_synthesizer',
+            time: '+820ms',
+            apiCalls: 1,
+            status: 'done',
+            summary: 'Compiled verification summary into final response payload.',
+            payload: '{ "tokens_out": 148, "finish_reason": "stop" }'
+          }
+        ],
+        finalMessage: 'The bindings use standard Python::with_gil scope guards. All dynamic query objects are safely bound to Rust lifetimes without manual reference-count leaks.'
+      },
+      'turn-2': {
+        turnLabel: 'Turn #2 • Active Execution',
+        prompt: 'Analyze AST symbols and resolve dependencies across the local Python workspace.',
+        completed: false,
+        tasksDone: 2,
+        tasksTotal: 4,
+        apiReq: 4,
+        failures: 0,
+        logs: [
+          {
+            id: 'Log #1',
+            node: 'workspace_crawler',
+            time: '+140ms',
+            apiCalls: 1,
+            status: 'done',
+            summary: 'Located 12 Python modules inside /agent_core and parsed import headers.',
+            payload: '{ "modules_found": 12, "entry": "graph_runner.py" }'
+          },
+          {
+            id: 'Log #2',
+            node: 'ast_analyzer',
+            time: 'running...',
+            apiCalls: 3,
+            status: 'running',
+            summary: 'Extracting StateGraph node edges and tool-binding schemas from AST...',
+            payload: 'Streaming AST nodes: [StateGraph, ToolNode, compile_graph]'
+          }
+        ],
+        finalMessage: null
+      }
+    };
+
+    function renderTreeForTurn(turnId) {
+      const data = workflowState[turnId];
+      drawerPrompt.innerText = `"${data.prompt}"`;
+      drawerTurnLabel.innerText = data.turnLabel;
+      drawerFooterMetrics.innerText = `Tasks: ${data.tasksDone}/${data.tasksTotal} | API Calls: ${data.apiReq} | Failures: ${data.failures}`;
+
+      if (data.completed) {
+        drawerStatusBadge.innerText = 'COMPLETED GRAPH';
+        drawerStatusBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+        simStepBtn.classList.add('hidden');
+      } else {
+        drawerStatusBadge.innerText = 'LIVE STREAMING';
+        drawerStatusBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 pulse-dot';
+        simStepBtn.classList.remove('hidden');
+      }
+
+      let html = '';
+
+      // Render every emitted log bubble connected by vertical stem
+      data.logs.forEach((log) => {
+        const isRunning = log.status === 'running';
+        const borderClass = isRunning
+          ? 'border-amber-500/60 bg-[#161f30] shadow-[0_0_20px_rgba(245,158,11,0.1)]'
+          : 'border-slate-800 bg-[#121826]';
+        const badgeClass = isRunning
+          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+
+        html += `
+          <!-- Vertical Tree Stem -->
+          <div class="w-0.5 h-7 bg-indigo-500/40 ml-6"></div>
+
+          <!-- Emitted Log Chat Bubble -->
+          <div class="w-full rounded-2xl border ${borderClass} p-4 space-y-2.5 transition-all">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${badgeClass}">
+                  ${log.id} &bull; ${log.node}
+                </span>
+                <span class="text-[11px] font-mono text-slate-400">API Req: +${log.apiCalls}</span>
+              </div>
+              <span class="text-xs font-mono ${isRunning ? 'text-amber-400 font-semibold' : 'text-slate-500'}">
+                ${log.time}
+              </span>
+            </div>
+            <p class="text-xs md:text-sm text-slate-200 leading-relaxed">${log.summary}</p>
+            <div class="bg-slate-950/90 border border-slate-800/90 rounded-lg px-3 py-2 text-[11px] font-mono text-slate-400 overflow-x-auto">
+              ${log.payload}
+            </div>
+          </div>
+        `;
+      });
+
+      // Bottom Final Message Bubble (or Live Generating Sentinel inside Tree)
+      html += `<div class="w-0.5 h-7 bg-indigo-500/40 ml-6"></div>`;
+
+      if (data.completed && data.finalMessage) {
+        html += `
+          <div class="w-full rounded-2xl border-2 border-emerald-500/50 bg-emerald-950/20 p-5 space-y-2 shadow-lg">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500 text-slate-950">
+                Final Agent Response Bubble
+              </span>
+              <span class="text-xs font-mono text-emerald-400">&#10003; Graph Settled</span>
+            </div>
+            <p class="text-sm text-slate-100 leading-relaxed pt-1">${data.finalMessage}</p>
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="w-full rounded-2xl border border- dashed border-indigo-500/40 bg-slate-900/40 p-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-400 pulse-dot"></span>
+              <span class="text-xs font-mono text-slate-400">Final response bubble waiting for remaining [${data.tasksTotal - data.tasksDone}] workflow tasks...</span>
+            </div>
+            <span class="text-[11px] font-mono text-indigo-400">In-Flight</span>
+          </div>
+        `;
+      }
+
+      treeStream.innerHTML = html;
+    }
+
+    function openDrawer(turnId) {
+      currentOpenTurn = turnId;
+      renderTreeForTurn(turnId);
+
+      // Slide in 75% drawer & activate focus backdrop
+      drawer.classList.remove('translate-x-full');
+      backdrop.classList.remove('opacity-0', 'pointer-events-none');
+      mainWorkspace.classList.add('scale-[0.98]', 'opacity-50');
+    }
+
+    function closeDrawer() {
+      drawer.classList.add('translate-x-full');
+      backdrop.classList.add('opacity-0', 'pointer-events-none');
+      mainWorkspace.classList.remove('scale-[0.98]', 'opacity-50');
+    }
+
+    // Interactive Simulation: Step through Turn 2 from Generating -> Completed
+    function advanceWorkflowSimulation() {
+      const t2 = workflowState['turn-2'];
+      if (t2.completed) return;
+
+      if (t2.tasksDone === 2) {
+        // Complete Step 2, Add Step 3
+        t2.logs[1].status = 'done';
+        t2.logs[1].time = '+410ms';
+        t2.tasksDone = 3;
+        t2.apiReq = 6;
+        t2.logs.push({
+          id: 'Log #3',
+          node: 'dependency_linker',
+          time: 'running...',
+          apiCalls: 2,
+          status: 'running',
+          summary: 'Cross-referencing Python LangGraph state schemas with Rust Slint UI models...',
+          payload: 'Linking: StepItem <-> LangGraph::NodeEvent'
+        });
+
+        // Update Main Chat Sentinel Summary
+        document.getElementById('turn2-task-count').innerText = 'Task [3/4]';
+        document.getElementById('turn2-api-req').innerText = '6';
+        document.getElementById('turn2-summary-line').innerText = 'dependency_linker: linking models...';
+        document.getElementById('global-api-count').innerText = '9';
+      } else if (t2.tasksDone === 3) {
+        // Complete all steps and settle final response
+        t2.logs[2].status = 'done';
+        t2.logs[2].time = '+290ms';
+        t2.tasksDone = 4;
+        t2.apiReq = 7;
+        t2.completed = true;
+        t2.turnLabel = 'Turn #2 • Completed History';
+        t2.logs.push({
+          id: 'Log #4',
+          node: 'terminal_synthesizer',
+          time: '+190ms',
+          apiCalls: 1,
+          status: 'done',
+          summary: 'Final AST dependency report generated and streamed to main chat bubble.',
+          payload: '{ "status": "complete", "total_nodes": 4 }'
+        });
+        t2.finalMessage = 'Resolved 12 local Python modules and mapped 4 LangGraph state nodes directly to your Rust Slint event loop with zero circular imports.';
+
+        // Transform Main Chat Sentinel into Completed Texture
+        document.getElementById('turn2-status-dot').className = 'w-2 h-2 rounded-full bg-emerald-400';
+        document.getElementById('turn2-task-count').innerText = 'Task [4/4]';
+        document.getElementById('turn2-task-count').className = 'text-emerald-400 font-semibold';
+        document.getElementById('turn2-api-req').innerText = '7';
+        document.getElementById('turn2-summary-line').innerText = 'Completed in 1.03s';
+        document.getElementById('turn2-summary-line').className = 'text-slate-400';
+        document.getElementById('turn2-card').className = 'bg-[#121824] border border-slate-800/90 rounded-2xl rounded-bl-xs p-4 text-sm space-y-3 shadow-md';
+        document.getElementById('turn2-body').innerHTML = `
+          <p class="text-slate-200 leading-relaxed">${t2.finalMessage}</p>
+        `;
+        document.getElementById('global-api-count').innerText = '10';
+
+        // Unlock Main Chat Input when drawer is closed
+        const chatInput = document.getElementById('chat-input');
+        chatInput.disabled = false;
+        chatInput.placeholder = 'Ask the LangGraph agent another question...';
+        chatInput.classList.remove('cursor-not-allowed');
+      }
+
+      renderTreeForTurn('turn-2');
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeDrawer();
+    });
+  </script>
+</body>
+</html>
