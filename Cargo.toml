@@ -7,7 +7,15 @@ build = "build.rs"
 
 [dependencies]
 
-slint = "1.16.0"
+# 1. default-features = false so 'FemtoVG' and 'Software' renderer fully off !
+# 2. backend-winit: Cross-platform Window + Input (Linux/Windows/Mac/Android/Web)
+# 3. renderer-skia-vulkan: Maximum GPU hardware acceleration via Google Skia + Vulkan!
+slint = { version = "1.16.0", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-skia-vulkan",
+] }
 time-format = "1.2.4"
 
 # When the auto-initialize feature is active: 
@@ -18,13 +26,15 @@ pyo3 = { version = "0.30.1", features = ["auto-initialize"] }
 
 toml = "1.1.8"
 serde = {version = "1.0.229", features = ["derive"]}
-
+uuid = {version= "1.29.0", features=["v4"]}
 [build-dependencies]
 slint-build = "1.16.0"
 
-# develop test binary 
-#
-# [[bin]]
-# name = "te"
-# path = "tests/load_core_boot.rs"
+# profile dev for workspace native source code to be compiled as un optimized and debug friendly !!
+[profile.dev]
+opt-level = 1
 
+# profile dev for all external packages (package."*") means all packages as wild card except crate !! 
+# for optimized slint code which rarely got to re compiled in future !!
+[profile.dev.package."*"]
+opt-level = 3

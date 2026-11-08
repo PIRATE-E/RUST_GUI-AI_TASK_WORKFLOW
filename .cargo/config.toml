@@ -1,6 +1,10 @@
 ## pyO3 natively reads that up during the building the target binary !!
 
 [env]
+# essential for the debugging FPS overlay on the top left to inspect 
+# FPS drop
+# SLINT_BACKEND = "winit" # winit is legacy and un optimized fall back use skia instead (literally stable 144hz fps)
+SLINT_DEBUG_PERFORMANCE = "refresh_full_speed,overlay"
 # Used by pyo3-build-config at compile time to link libpython
 PYO3_PYTHON = "/home/pirate/development/ai-workflow-task-agent/.venv/bin/python"
  
