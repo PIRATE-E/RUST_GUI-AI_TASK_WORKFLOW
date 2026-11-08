@@ -1,0 +1,70 @@
+// =============================================================================
+// FILE: ui/chat_bubbles/user-bubble.slint
+// PURPOSE: Modern Indigo-Gradient card for right-aligned user prompts.
+// DESIGN:
+//   - Replaces flat WhatsApp green with a deep Indigo-to-Violet linear gradient
+//     (#4f46e5 -> #3730a3), subtle glowing border (#6366f1), and 3D drop shadow.
+//   - Zero telemetry overhead; only reads `sender`, `text`, and `timestamp`.
+// =============================================================================
+
+import { ChatMessage } from "../types.slint";
+
+export component UserBubble inherits Rectangle {
+    in property <ChatMessage> msg;
+
+    width: 340px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: #6366f188;
+    background: @linear-gradient(135deg, #4338ca 0%, #312e81 100%);
+    drop-shadow-blur: 14px;
+    drop-shadow-color: #00000077;
+    drop-shadow-offset-y: 4px;
+    clip: true;
+
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 6px;
+
+        // Top Row: Sender Pill Badge
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: root.msg.sender;
+                color: #c7d2fe;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.4px;
+            }
+
+            Text {
+                text: "PROMPT";
+                color: #818cf8;
+                font-size: 9px;
+                font-weight: 700;
+            }
+        }
+
+        // Middle: User Message Text
+        Text {
+            text: root.msg.text;
+            color: #f8fafc;
+            font-size: 13.5px;
+            wrap: TextWrap.word-wrap;
+            horizontal-alignment: left;
+        }
+
+        // Bottom: Right-aligned Timestamp
+        HorizontalLayout {
+            alignment: end;
+            Text {
+                text: root.msg.timestamp;
+                color: #a5b4fc;
+                font-size: 10px;
+            }
+        }
+    }
+}

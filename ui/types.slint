@@ -1,0 +1,48 @@
+// =============================================================================
+// FILE: ui/types.slint
+// PURPOSE: Canonical data types and contracts shared between Slint UI and Rust.
+// ARCHITECTURE:
+//   1. AppState       -> Controls Splash Screen -> Main Chat -> Boot Error view.
+//   2. DrawerLogItem  -> Single log card rendered inside the 75% TicketDrawer.
+//   3. ChatMessage    -> Unified single-struct row contract for ListView.
+//                        Packs both chat fields AND live AI telemetry fields
+//                        so Rust can mutate any bubble in-place via
+//                        `VecModel::set_row_data(idx, updated_msg)` with zero
+//                        flicker.
+// =============================================================================
+
+export enum AppState {
+    Booting,
+    Ready,
+    Failed,
+}
+
+// Single log entry item displayed inside the 75% Slide-In Ticket Drawer.
+export struct DrawerLogItem {
+    timestamp: string,   // e.g. "10:45:02.120"
+    category: string,    // e.g. "API_CALL", "TOOL_EXECUTION", "AGENT_WORKFLOW"
+    level: string,       // e.g. "INFO", "WARNING", "ERROR"
+    message: string,     // Log description emitted by ColdWind core
+    meta-preview: string // Compact key-value metadata string (or empty)
+}
+
+// Unified message & telemetry record for each row in `root.messages`.
+// WHAT: Canonical data contract representing both chat messages and live AI telemetry.
+// WHY: Single struct avoids duplicate models and allows zero-flicker in-place updates.
+// ANDROID/PYTHON BRIDGE: Equivalent to an Android ChatMessage Kotlin data class or Room Entity.
+export struct ChatMessage {
+    // --- 1. Identity & Core Content ---
+    ticket-id: string,       // e.g. "pending" initially, then "slint-0001"
+    text: string,            // Prompt text (User) or final Markdown/Text (AI)
+    is-user: bool,           // true = UserBubble (Right), false = AiBubble (Left)
+    sender: string,          // e.g. "You", "ColdWind AI"
+    timestamp: string,       // e.g. "10:45 AM" or "1240 ms"
+
+    // --- 2. Live AI Telemetry State (Consumed by AiBubble & TicketDrawer) ---
+    is-generating: bool,     // true = shows pulsing Sentinel box & Amber dot
+    task-progress: string,   // e.g. "Task [0/0]" -> "Task [2/3]"
+    rpm-count: int,          // NEW: Live 60s sliding window RPM counter (from OpenAIIntegration)
+    api-count: int,          // Live count of total LLM API calls in this turn
+    fail-count: int,         // Live count of ERROR/WARNING events in this turn
+    live-summary: string,    // Latest log headline / untruncated agent quote
+}

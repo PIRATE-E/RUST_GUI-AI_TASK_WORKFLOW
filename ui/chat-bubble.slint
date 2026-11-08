@@ -1,0 +1,33 @@
+// =============================================================================
+// FILE: ui/chat-bubble.slint
+// PURPOSE: Single-entry-point Orchestrator component for ListView rows.
+// ARCHITECTURE:
+//   - Inherits `VerticalLayout` so Slint's layout engine automatically computes
+//     the exact dynamic height of whichever child branch is active.
+//   - Branches purely on `root.msg.is-user`:
+//       true  -> UserBubble (Right-aligned Indigo card)
+//       false -> AiBubble   (Left-aligned Cyber-Slate telemetry card)
+// =============================================================================
+
+import { ChatMessage } from "types.slint";
+import { UserBubble } from "chat_bubbles/user-bubble.slint";
+import { AiBubble } from "chat_bubbles/ai-bubble.slint";
+
+export component ChatBubble inherits VerticalLayout {
+    padding: 0px;
+    spacing: 0px;
+
+    in property <ChatMessage> msg;
+    callback inspect-ticket(string);
+
+    if root.msg.is-user: UserBubble {
+        msg: root.msg;
+    }
+
+    if !root.msg.is-user: AiBubble {
+        msg: root.msg;
+        inspect-ticket(id) => {
+            root.inspect-ticket(id);
+        }
+    }
+}

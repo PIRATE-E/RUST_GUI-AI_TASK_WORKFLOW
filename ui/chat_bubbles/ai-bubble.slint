@@ -1,0 +1,292 @@
+// =============================================================================
+// FILE: ui/chat_bubbles/ai-bubble.slint
+// PURPOSE: Modern Cyber-Slate AI response card with dual RPM/Total API badges,
+//          hover-safe top telemetry bar, and multi-line word-wrapped Sentinel box.
+// ARCHITECTURE & WHAT WAS UPGRADED:
+//   1. Top Bar: Stripped of duplicate text to prevent hover collisions. Now holds
+//      compact numeric pills only: Task Progress, Dual RPM/Total API, and ERR badge.
+//   2. Expanding `|>` Button: Hover expansion no longer crushes any text.
+//   3. Sentinel Live Box: Upgraded from single-line elided text to multi-line
+//      `wrap: TextWrap.word-wrap` so complete agent quotes, tool queries, and
+//      status descriptions are fully readable directly in the chat feed.
+// =============================================================================
+
+import { ChatMessage } from "../types.slint";
+
+// WHAT: AI response presentation component rendering live telemetry and final transcript.
+// WHY: Decoupled into specialized AI card so UserBubble remains lightweight and distinct.
+// ANDROID/PYTHON BRIDGE: Equivalent to an Android RecyclerView ViewHolder for AI messages.
+export component AiBubble inherits Rectangle {
+    in property <ChatMessage> msg;
+
+    // Fired when user clicks `|>` (works both while live broadcasting & after turn finishes!)
+    callback inspect-ticket(string);
+
+    width: 430px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.msg.is-generating ? #f59e0b99 :
+        (root.msg.fail-count > 0 ? #ef444488 : #26334d);
+    // WHAT: Cyber-Slate card background with 144 FPS optimized GPU rendering.
+    // WHY: Omitted `drop-shadow-blur` to eliminate Gaussian blur re-rasterization during animations and scrolling.
+    // ANDROID/SLINT BRIDGE: Equivalent to using a lightweight CardView with elevation=0dp and crisp stroke borders.
+    background: @linear-gradient(180deg, #161f30 0%, #0f172a 100%);
+    clip: true;
+
+    animate border-color {
+        duration: 220ms;
+        easing: ease-out;
+    }
+
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 9px;
+
+        // =====================================================================
+        // 1. TOP TELEMETRY STRIP (Pills Only — Zero Hover Collision!)
+        // =====================================================================
+        Rectangle {
+            height: 32px;
+            background: #090d16;
+            border-radius: 7px;
+            border-width: 1px;
+            border-color: root.msg.is-generating ? #f59e0b44 : #1e293b;
+
+            HorizontalLayout {
+                padding-left: 9px;
+                padding-right: 4px;
+                spacing: 6px;
+
+                // LEFT: Telemetry Metric Pills
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 5px;
+                    alignment: start;
+
+                    // Live Status Dot (Amber = Generating, Red = Error, Emerald = Completed)
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: root.msg.is-generating ? #f59e0b :
+                            (root.msg.fail-count > 0 ? #ef4444 : #10b981);
+                        y: (parent.height - self.height) / 2;
+                        animate background { duration: 200ms; }
+                    }
+
+                    // Pill 1: Task Progress
+                    Rectangle {
+                        height: 20px;
+                        background: #1e293b;
+                        border-radius: 4px;
+                        y: (parent.height - self.height) / 2;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: root.msg.task-progress;
+                                color: #e2e8f0;
+                                font-size: 10px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Pill 2: Dual API Velocity (RPM + Total Requests)
+                    Rectangle {
+                        height: 20px;
+                        background: root.msg.is-generating ? #f59e0b18 : #0f172a;
+                        border-width: 1px;
+                        border-color: root.msg.is-generating ? #f59e0b55 : #1e293b;
+                        border-radius: 4px;
+                        y: (parent.height - self.height) / 2;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: root.msg.is-generating
+                                    ? ("⚡ " + root.msg.rpm-count + " RPM • " + root.msg.api-count + " Reqs")
+                                    : ("API: " + root.msg.api-count + " Reqs");
+                                color: root.msg.is-generating ? #fcd34d : #94a3b8;
+                                font-size: 10px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Pill 3: Fault Counter (Only visible if errors > 0)
+                    if root.msg.fail-count > 0: Rectangle {
+                        height: 20px;
+                        background: #ef444425;
+                        border-width: 1px;
+                        border-color: #ef444488;
+                        border-radius: 4px;
+                        y: (parent.height - self.height) / 2;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: "ERR: " + root.msg.fail-count;
+                                color: #fca5a5;
+                                font-size: 10px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // RIGHT: Expanding `|>` Drawer Trigger Button
+                slide-btn := Rectangle {
+                    horizontal-stretch: 0;
+                    width: btn-touch.has-hover ? 132px : 28px;
+                    height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    background: btn-touch.has-hover ? #6366f1 : #1e293b;
+                    border-radius: 5px;
+                    border-width: 1px;
+                    border-color: btn-touch.has-hover ? #818cf8 : #334155;
+
+                    animate width, background, border-color {
+                        duration: 180ms;
+                        easing: ease-out;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        Text {
+                            text: btn-touch.has-hover
+                                ? (root.msg.is-generating ? "|> Live Console" : "|> Inspect Logs")
+                                : "|>";
+                            color: btn-touch.has-hover ? #ffffff : #818cf8;
+                            font-size: 10px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    btn-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.inspect-ticket(root.msg.ticket-id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
+        // 2. SENDER HEADER & TICKET ID TAG
+        // =====================================================================
+        HorizontalLayout {
+            alignment: space-between;
+
+            Text {
+                text: root.msg.sender;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.4px;
+            }
+
+            Text {
+                text: "#" + root.msg.ticket-id;
+                color: #64748b;
+                font-size: 10px;
+                font-weight: 600;
+            }
+        }
+
+        // =====================================================================
+        // 3. BODY: MULTI-LINE SENTINEL LIVE CONSOLE OR FINAL TRANSCRIPT
+        // =====================================================================
+        if root.msg.is-generating: Rectangle {
+            min-height: 68px;
+            background: #0b111e;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #f59e0b66;
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                alignment: stretch;
+
+                // Left Amber Accent Bar
+                Rectangle {
+                    width: 4px;
+                    border-radius: 2px;
+                    background: #f59e0b;
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 4px;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        Text {
+                            text: "LIVE AGENT TELEMETRY & QUOTES";
+                            color: #fbbf24;
+                            font-size: 10px;
+                            font-weight: 700;
+                            letter-spacing: 0.5px;
+                        }
+                        Text {
+                            text: root.msg.rpm-count + " req/min";
+                            color: #f59e0b;
+                            font-size: 9.5px;
+                            font-weight: 700;
+                        }
+                    }
+
+                    // Multi-line Word-Wrapped Live Quote / Action Summary (No Elide!)
+                    Text {
+                        text: root.msg.live-summary;
+                        color: #e2e8f0;
+                        font-size: 12px;
+                        wrap: TextWrap.word-wrap;
+                        horizontal-alignment: left;
+                    }
+                }
+            }
+        }
+
+        if !root.msg.is-generating: Text {
+            text: root.msg.text;
+            color: #e2e8f0;
+            font-size: 13.5px;
+            wrap: TextWrap.word-wrap;
+            horizontal-alignment: left;
+        }
+
+        // =====================================================================
+        // 4. FOOTER: LIVE STREAMING / COMPLETED STATUS + LATENCY
+        // =====================================================================
+        HorizontalLayout {
+            alignment: space-between;
+
+            Text {
+                text: root.msg.is-generating
+                    ? "● BROADCASTING TELEMETRY"
+                    : "✓ COMPLETED • " + root.msg.live-summary;
+                color: root.msg.is-generating ? #f59e0b : #10b981;
+                font-size: 9.5px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.msg.timestamp;
+                color: #64748b;
+                font-size: 10px;
+            }
+        }
+    }
+}
