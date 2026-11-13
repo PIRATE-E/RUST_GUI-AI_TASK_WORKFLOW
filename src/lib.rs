@@ -1,6 +1,7 @@
 use core::fmt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, RecvError, SyncSender, TryRecvError};
@@ -117,13 +118,19 @@ impl TicketUiState {
                 }
             }
 
-            // Failure counter
+            // (c) Monotonic failure counter
+            // WHAT: Monotonic latch for turn-scoped failures.
+            // WHY: Upstream subagent finalizer emits `failed_count: 0` for skipped tasks.
+            //      Never allow a subsequent 0 to erase recorded API circuit-breaker failures!
+            // BRIDGE: In CPython, think of this like `self.failed_count = max(self.failed_count, fails)`.
             if let Some(fails) = map
                 .get("failure_count")
                 .or_else(|| map.get("failed_count"))
                 .and_then(|m| m.as_i32())
             {
-                self.failed_count = fails;
+                if fails > self.failed_count {
+                    self.failed_count = fails;
+                }
                 had_explicit_failures = true;
             }
         }
@@ -205,7 +212,7 @@ impl TicketUiState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogLevel {
     DEBUG,
     ERROR,
@@ -226,7 +233,7 @@ impl LogLevel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogCategory {
     ApiCall,
     ToolExecution,
@@ -252,7 +259,25 @@ impl LogCategory {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// because serde_json serialize the Enum as variance : value so then
+// MetaData::Integer(10) would becomes {"Integer" : 10} in jsonl file so that is gonna create issue
+// if we have to Deserialize back to LogEntry because there would be whole different keys and values
+// and for metadict instead of {"task_id" : 12} it would be {"dict" : {"task_id" : {"Integer": 12}}}
+// so to avoid that nesting and Variance verbose keys and value we have to use untagged
+// (default is tagged)
+//
+//
+// ❌ WITHOUT #[serde(untagged)] (Default)       ✅ WITH #[serde(untagged)]
+// ───────────────────────────────────────       ──────────────────────────
+// {                                             {
+//   "Dict": {                                     "task_id": 2,
+//     "task_id": { "Integer": 2 },                "tool": "sql"
+//     "tool": { "String": "sql" }               }
+//   }
+// }
+//
+#[serde(untagged)]
 pub enum MetaData {
     // If there is no metadata direct map it to Option::None
     // Null,
@@ -388,7 +413,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for MetaData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)] // to make LogEntry serialized into bytes to save into file !!
 pub struct LogEntry {
     pub log_type: LogCategory,
     pub log_level: LogLevel,
@@ -523,5 +548,6 @@ pub fn init_sync_send_all() -> ReceiverLogEntry {
 // connect coldwind {load coldwind directly in the running env}
 pub mod load_python;
 pub mod log_entry_handler;
+pub mod serialize_logs_in_file;
 pub mod slint_py_engine;
 pub mod status_quote_engine;

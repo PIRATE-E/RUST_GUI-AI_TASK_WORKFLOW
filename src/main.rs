@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use ai_workflow_gui::load_python::gc_connect;
 use ai_workflow_gui::log_entry_handler::{attach_display_into_handler, attach_handle_into_handler};
+use ai_workflow_gui::serialize_logs_in_file::SwapLogFileWriter;
 use ai_workflow_gui::slint_py_engine::SlintRuntime;
 use ai_workflow_gui::{LogEntry, TicketUiState, init_sync_send_all};
 use slint::{ComponentHandle, Model, ModelRc, SharedString};
@@ -107,6 +108,21 @@ fn main() {
     // cloned drawer_logs_model for make it clear !! when user send next message
     let drawer_logs_model_clear = drawer_logs_model.clone();
 
+    // file state struct sharing for push logs into swap file and sync that swap file on completion
+    // of that ticket !!
+    let swap_syncer: Arc<Mutex<SwapLogFileWriter>> =
+        Arc::new(Mutex::new(SwapLogFileWriter::new("test_dev_logs").unwrap()));
+
+    // thread 3 clone that push its logs into the swap file !!
+    let swap_file_push_t3 = swap_syncer.clone();
+
+    // thread 0 swap file creater on user send first message and that ticket is just got is_generating = true
+    let swap_file_create_t0 = swap_syncer.clone();
+
+    // thread 2 when process ticket finish the ticket got the result from core engine as ticket out
+    // and is_generating = false for that ai ticket !!
+    let swap_file_commit_t2 = swap_syncer.clone();
+
     // now the worker thread 2 spawned ~!
 
     std::thread::spawn(move || {
@@ -145,6 +161,10 @@ fn main() {
                 while let Ok(worker_state) = state_receiver.recv() {
                     let ui_weak = boot_weak_ref.clone();
 
+                    // sync the swap file for that ticket_id to jsonl
+                    // file !! for every ticket turn!!
+                    let every_ticket_swap_commit_t2 = swap_file_commit_t2.clone();
+
                     match worker_state {
                         WorkerState::CurrentUserMsg {
                             prompt,
@@ -162,6 +182,8 @@ fn main() {
                                     60,
                                 ) {
                                     Ok(ticket_out) => {
+                                        // ticket_id process done ticket_out recieved and
+                                        // is_generating should be false from now !!
                                         slint::invoke_from_event_loop(move || {
                                             if let Some(app_ui) = ui_weak.upgrade() {
                                                 // in place mutate the dummy AI ChatMessage to message_stack to the final AI ChatMessage
@@ -192,6 +214,10 @@ fn main() {
                                                 if app_ui.get_drawer_open() {
                                                     app_ui.set_active_ticket(last_ai_msg);
                                                 }
+
+                                                // commit that ticket swap file !!
+                                                every_ticket_swap_commit_t2.lock().unwrap().commit_turn().unwrap();
+
                                             }
                                         })
                                         .unwrap();
@@ -244,6 +270,18 @@ fn main() {
                 .lock()
                 .unwrap()
                 .push(drawer_log_item.clone());
+
+            // 3 push and serialize logs in file !!
+            // WHAT: Guards against unassigned/boot logs and logs error instead of crashing.
+            // WHY: If Python emits logs before TICKET • START or after commit_turn, Thread 3 stays alive.
+            if !state.ticket_id.is_empty()
+                && let Err(err) = swap_file_push_t3
+                    .lock()
+                    .unwrap()
+                    .dump_log_entry(&log, state.ticket_id.as_str())
+            {
+                eprintln!("[Thread 3 Logging] Skipped log: {err}");
+            }
 
             // 3. Extract snapshot values to update the AI bubble
             let task_progress = state.task_progress();
@@ -331,7 +369,7 @@ fn main() {
         if let Some(app) = appwekref.upgrade() {
             // clear the logs of from buffer of drawer_log_item because we have to
             // now populates new logs of new ticket !!
-            drawer_log_items_clear.lock().unwrap().clear();
+            drawer_log_items_clear.clone().lock().unwrap().clear();
             drawer_logs_model_clear.set_vec(Vec::default());
 
             let text = app.get_current_input();
@@ -349,6 +387,14 @@ fn main() {
                 ticket_id: ticket_id.clone(),
                 turn_counter,
             });
+
+            // initialize swap file for that particular ticket !!
+
+            swap_file_create_t0
+                .lock()
+                .unwrap()
+                .derive_swap_file(&ticket_id)
+                .unwrap();
 
             if !text.is_empty() {
                 // render the user message bubble !!
@@ -402,6 +448,18 @@ fn main() {
                 // instead first clear the viewport of the drawer so it can showned empty for while
                 // which is valid instead of showing logs of whole another ticket !!
                 drawer_logs_model.set_vec(Vec::default());
+                // now fetch the list convert it to the DrawerLogItem's list and set that view on
+                // slint !!
+                drawer_logs_model.set_vec(
+                    swap_syncer
+                        .lock()
+                        .unwrap()
+                        .fetch_log_entry(&ticket_id_str)
+                        .unwrap_or_default() // if the file is missing or any error show empty list only !!
+                        .iter()
+                        .map(DrawerLogItem::from)
+                        .collect::<Vec<DrawerLogItem>>(),
+                );
             }
         }
     });
