@@ -1,4 +1,5 @@
 slint::include_modules!();
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,6 +17,13 @@ use time_format::{now, strftime_local};
 use pyo3::prelude::*;
 use std::sync::mpsc::{self};
 use uuid::Uuid;
+
+#[allow(unused_imports)]
+use ai_workflow_gui::splash_screen::{
+    CachedGlyphCell, Frame, ScreenWindow, build_glyph_cache, draw_pixels_on_buffer,
+    load_embedded_json_frames, load_json_frame,
+};
+
 // state we have to maintain !! between main gui thread
 // and worker thread which holds slint runtime python objects
 // to make worker thread to submit ticket in we have to hand over
@@ -54,9 +62,93 @@ impl From<&LogEntry> for DrawerLogItem {
 fn main() {
     let app = AppWindow::new().unwrap();
 
+    // get the window properties
+    // splash screen arrangements: flexible real-time best fit size
+    let win_size = app.window().size();
+    let fit_width = if win_size.width > 0 { win_size.width } else { 1280 };
+    let fit_height = if win_size.height > 0 { win_size.height } else { 720 };
+
+    let mut main_screen: ScreenWindow = ScreenWindow {
+        // i guess i would degrate that upto 1920 x 1080
+        // after if the ascii got enhanced or more complexed
+        width: fit_width,
+        height: fit_height,
+    };
+
+    let mut cell_width = (main_screen.width / 160).max(1);
+    let mut cell_height = (main_screen.height / 64).max(1);
+    let font_px = cell_height as f32; // matches cell height for crisp glyphs
+
+    // screen (x,y) cordinates of each pixels !! use heap allocation to avoid stack over flow!
+    // 1920 x 1080 x 4 because 1 pixel = 4 RGBA values (renderer would take care of mapping)
+    let mut rgba_1d_array: Vec<u8> =
+        vec![0; ((main_screen.width * main_screen.height) * 4) as usize];
+    // load the json frames from directly binary !! --
+    let json_frame: Vec<Frame> = load_embedded_json_frames()
+        .expect("main thread failed while loading embedded splash frames");
+    //  --
+
+    // // Load from direct JSON file --
+    // let json_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    //     .join("assests/coldwind_splash_144hz.json");
+    // let json_frame: Vec<Frame> =
+    //     load_json_frame(&json_path).expect("main thread failed while loading json file");
+    // // --
+
+    let glyph_cached_cells: HashMap<char, CachedGlyphCell> =
+        build_glyph_cache(&json_frame, font_px);
+
     // our app main window state !! currently at booting to make the
     // python worker to spawn the python runtime !!
     app.set_app_state(AppState::Booting);
+
+    // WHAT: 144 Hz Slint Timer driving Kyoto Dusk ASCII splash animation.
+    // WHY: 144 FPS = 1 frame per 6.944 ms (6_944_444 ns). Blits frame onto splash-frame-texture
+    //      until AppState transitions out of Booting.
+    // BRIDGE: In Python / CPython, equivalent to a QTimer or threading loop ticking at 144 Hz.
+    let splash_timer = slint::Timer::default();
+    let splash_weak = app.as_weak();
+    let mut current_frame_idx: usize = 0;
+    let total_frames = json_frame.len();
+
+    splash_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_nanos(6_944_444), // True native 144 FPS (6.944 ms)
+        move || {
+            let Some(app_ui) = splash_weak.upgrade() else {
+                return;
+            };
+            if app_ui.get_app_state() != AppState::Booting {
+                return;
+            }
+
+            // Real-time dynamic window size adaptation (best-fit on resize or maximize)
+            let cur_size = app_ui.window().size();
+            if cur_size.width > 0 && cur_size.height > 0
+                && (cur_size.width != main_screen.width || cur_size.height != main_screen.height)
+            {
+                main_screen.width = cur_size.width;
+                main_screen.height = cur_size.height;
+                cell_width = (main_screen.width / 160).max(1);
+                cell_height = (main_screen.height / 64).max(1);
+                rgba_1d_array.resize(((main_screen.width * main_screen.height) * 4) as usize, 0);
+            }
+
+            if total_frames > 0 {
+                let frame = &json_frame[current_frame_idx];
+                let img = draw_pixels_on_buffer(
+                    &main_screen,
+                    &mut rgba_1d_array,
+                    frame,
+                    &glyph_cached_cells,
+                    cell_width,
+                    cell_height,
+                );
+                app_ui.set_splash_frame_texture(img);
+                current_frame_idx = (current_frame_idx + 1) % total_frames;
+            }
+        },
+    );
     let appwekref = app.as_weak();
     // we have to grab the listeners and the properties before the app got run !!
 
