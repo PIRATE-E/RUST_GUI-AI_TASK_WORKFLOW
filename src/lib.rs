@@ -546,8 +546,10 @@ pub fn init_sync_send_all() -> ReceiverLogEntry {
 
 // this is key file got all the handle helper to
 // connect coldwind {load coldwind directly in the running env}
+// export required in order to test
 pub mod load_python;
 pub mod log_entry_handler;
 pub mod serialize_logs_in_file;
 pub mod slint_py_engine;
+pub mod splash_screen;
 pub mod status_quote_engine;
