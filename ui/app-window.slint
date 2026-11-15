@@ -13,10 +13,10 @@ import { TicketDrawer } from "ticket-drawer.slint";
 export { AppState, ChatMessage, DrawerLogItem }
 export component AppWindow inherits Window {
     title: "Cold Wind AI • Workflow & Telemetry Console";
-    min-width: 540px;
-    min-height: 500px;
-    preferred-width: 760px;
-    preferred-height: 640px;
+    min-width: 640px;
+    min-height: 360px;
+    preferred-width: 1280px;
+    preferred-height: 1080px;
     background: #090d16; // Deep Obsidian Canvas
 
     // =========================================================================
@@ -25,6 +25,7 @@ export component AppWindow inherits Window {
     in-out property <AppState> app-state: AppState.Booting;
     in property <string> boot-status: "Initializing Cold Wind AI Core...";
     in property <string> boot-error: "";
+    in property <image> splash-frame-texture;
 
     // 1. Main Chat Message Feed (Populated & Mutated In-Place via Rust VecModel)
     in property <[ChatMessage]> messages: [
@@ -190,13 +191,27 @@ export component AppWindow inherits Window {
         width: 100%;
         height: 100%;
 
+        // WHAT: 144 FPS Kyoto Dusk ASCII art splash texture rendered by splash_screen module.
+        // WHY: Replaces static loading text with high-performance animated visual scenery.
+        // BRIDGE: In Android XML, equivalent to <ImageView android:scaleType="fitCenter" android:layout_width="match_parent" android:layout_height="match_parent" />
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.splash-frame-texture;
+            // 'contain' keeps exact aspect ratio without stretching characters
+            image-fit: ImageFit.contain;
+            // 'smooth' uses bilinear filtering for crisp HiDPI downscaling
+            image-rendering: ImageRendering.smooth;
+        }
+
         VerticalLayout {
-            alignment: center;
-            spacing: 14px;
+            alignment: end;
+            padding-bottom: 24px;
+            spacing: 8px;
 
             Text {
                 text: "COLD WIND AI";
-                font-size: 26px;
+                font-size: 22px;
                 font-weight: 700;
                 letter-spacing: 1.5px;
                 color: #6366f1;
@@ -205,7 +220,7 @@ export component AppWindow inherits Window {
 
             Text {
                 text: root.boot-status;
-                font-size: 13px;
+                font-size: 12px;
                 color: #94a3b8;
                 horizontal-alignment: center;
             }
