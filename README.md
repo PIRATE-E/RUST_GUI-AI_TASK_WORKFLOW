@@ -15,9 +15,9 @@
 [![PyO3](https://img.shields.io/badge/PyO3-v0.26.0-yellow.svg)](https://pyo3.rs/)
 [![Python 3.14+](https://img.shields.io/badge/CPython-3.14+-green.svg?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
-[![Status: Phase 0.0.1](https://img.shields.io/badge/Status-Phase_0.0.1_Complete-brightgreen.svg)](<>)
+[![Status: Phase 0.0.2 Active](https://img.shields.io/badge/Status-Phase_0.0.2_Active-brightgreen.svg)](<>)
 
-**High-performance, GPU-accelerated native desktop GUI built with Rust (2024 edition) and the Slint UI framework, embedding the headless Python 3.14 LangGraph AI engine via zero-overhead PyO3 FFI bindings and dual-thread non-blocking concurrency.**
+**High-performance, GPU-accelerated native desktop GUI built with Rust (2024 edition) and the Slint UI framework, embedding the headless Python 3.14 LangGraph AI engine via zero-overhead PyO3 FFI bindings, 3-Thread OS Actor Concurrency (Threads 0, 2, 3), 144 Hz Native UI & ZSTD-Embedded Kyoto Dusk Splash Engine, and ACID .swap -> .jsonl Telemetry Persistence.**
 
 </div>
 
@@ -28,14 +28,14 @@
 - [🧩 Quick Mental Model (1-minute)](#-quick-mental-model-1-minute)
 - [🧠 PyO3 & Rust FFI Mental Models](#-pyo3--rust-ffi-mental-models)
   - [1. `Bound<'py, T>` vs `Py<T>` (Scoped Handle vs Heap Handle)](#1-boundpy-t-vs-pyt-scoped-handle-vs-heap-handle)
-  - [2. GIL Attachment & Dual-Thread Topology](#2-gil-attachment--dual-thread-topology)
+  - [2. GIL Attachment & 3-Thread Actor Topology](#2-gil-attachment--3-thread-actor-topology)
   - [3. `&self` Sinks vs `&mut self` Re-entrancy Panic](#3-self-sinks-vs-mut-self-re-entrancy-panic)
   - [4. `slint::Weak<AppWindow>` UI Marshalling](#4-slintweakappwindow-ui-marshalling)
 - [📱 The Android Studio Mental Bridge (XML/Java ↔ Slint/Rust)](#-the-android-studio-mental-bridge-xmljava--slintrust)
 - [🚀 What's New](#-whats-new)
 - [✨ Current Status](#-current-status)
 - [🌟 Core Capabilities & Architectural Pillars](#-core-capabilities--architectural-pillars)
-- [⚡ Dual-Thread Runtime Topology](#-dual-thread-runtime-topology)
+- [⚡ Three-Thread OS Actor Concurrency](#-three-thread-os-actor-concurrency)
 - [🗺️ Project Architecture](#️-project-architecture)
   - [🚀 Application Entry & Lifecycle](#-application-entry--lifecycle)
   - [🎨 Declarative UI Presentation Layer](#-declarative-ui-presentation-layer)
@@ -44,8 +44,8 @@
   - [📡 Native Logging Interception Sinks](#-native-logging-interception-sinks)
   - [🧪 Verification Test Suite](#-verification-test-suite)
   - [📚 Architecture & Learning Reports](#-architecture--learning-reports)
-- [🧪 4-Tier Test Harness & Verification Suite](#-4-tier-test-harness--verification-suite)
-  - [4-Tier Test Pyramid Overview](#4-tier-test-pyramid-overview)
+- [🧪 6-Target Integration Test Pyramid](#-6-target-integration-test-pyramid)
+  - [6-Target Integration Test Pyramid Overview](#6-target-integration-test-pyramid-overview)
   - [Individual Test Binaries & Invariants](#individual-test-binaries--invariants)
   - [Why Cargo Runs Integration Tests as Separate Binaries](#why-cargo-runs-integration-tests-as-separate-binaries)
 - [🔄 End-to-End Data Flow](#-end-to-end-data-flow)
@@ -62,16 +62,16 @@
 If you remember only _one_ diagram, remember this:
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│  You type in Slint UI  →  MPSC Channel  →  PyO3 Engine  →  invoke_from │
-│     (Thread 0: 60 FPS)    (Thread-Safe)   (Thread N)     (UI Redraw)   │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│  You type in Slint UI  →  SyncChannel(1)  →  PyO3 Engine  →  Telemetry Drainer   │
+│   (Thread 0: 144 Hz)      (Thread-Safe)     (Thread 2)    (Thread 3: ACID .swap) │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **User interacts with UI (Thread 0):** Slint renders smoothly at 60 FPS on the GPU. The window handle is `!Send` and NEVER touches Python code or acquires the GIL.
-2. **Commands cross the bridge:** User messages are packed into lightweight Rust structs and sent over an asynchronous `std::sync::mpsc::channel` to Thread N.
-3. **Headless Engine executes (Thread N):** An isolated OS thread hosts the CPython 3.14 runtime. It wakes up, executes LangGraph nodes, talks to LLMs via NVIDIA NIM, intercepts logs into native Rust queues, and generates a `TicketOut` transcript.
-4. **State reflects back to UI:** Thread N schedules a closure onto Thread 0's event loop via `slint::invoke_from_event_loop()`, updating reactive Slint properties and triggering automatic GPU redraws.
+1. **User interacts with UI (Thread 0):** Slint renders smoothly at up to 144 Hz on the GPU with dynamic 16:9 best-fit scaling and a 144 Hz Kyoto Dusk splash screen engine. The window handle is `!Send` and NEVER touches Python code or acquires the GIL.
+2. **Commands cross the bridge:** User messages are packed into lightweight Rust structs and sent over an asynchronous bounded `sync_channel(1)` to Thread 2.
+3. **Headless Engine executes (Thread 2):** An isolated OS thread hosts the CPython 3.14 runtime. It wakes up, executes LangGraph nodes, talks to LLMs via NVIDIA NIM, intercepts logs into native Rust queues, and generates a `TicketOut` transcript.
+4. **Telemetry drains & persists (Thread 3):** Thread 3 drains `sync_channel(1024)` logs, executes atomic `.swap` to `.jsonl` ACID writes, and schedules in-place bubble mutation onto Thread 0's event loop via `slint::invoke_from_event_loop()`.
 
 ---
 
@@ -95,18 +95,23 @@ In modern PyO3 0.26+ (PEP 703 compliant), memory ownership is strictly bifurcate
 - **`Bound<'py, T>` (GIL-Bound Reference):** Represents a Python object verified to be valid while the GIL is currently held on this thread. You invoke methods directly on `Bound`.
 - **`Py<T>` (Detached Python Handle):** Owns a Python reference pointer on the CPython heap with a `'static` lifetime. It can be stored inside Rust structs (such as `SlintRuntime`) or transferred across threads. To invoke methods on it, you re-attach it to an active GIL scope using `.bind(py)`.
 
-### 2. GIL Attachment & Dual-Thread Topology
+### 2. GIL Attachment & 3-Thread Actor Topology
 
 ```text
-Thread 0 (Slint UI Loop):
+Thread 0 (Slint UI Loop + 144 Hz Splash Timer):
   ❌ NEVER call Python::attach(|py| ...)
   ❌ NEVER wait on Python locks
-  ✅ Always free to process mouse, keyboard, and GPU repaint events
+  ✅ Always free to process mouse, keyboard, and GPU repaint events at 144 Hz
 
-Thread N (Engine Worker Thread):
+Thread 2 (Engine Worker Thread):
   ✅ Calls Python::attach(|py| { ... }) to enter CPython runtime
   ✅ Calls py.detach() when performing long network I/O to release the GIL
-  ✅ Blocks at 0% CPU on mpsc::Receiver when idle
+  ✅ Blocks at 0% CPU on sync_channel(1) Receiver when idle
+
+Thread 3 (Telemetry & ACID Persistence Drainer):
+  ✅ Runs 100% in native Rust with ZERO GIL acquisition
+  ✅ Drains sync_channel(1024) and persists logs to disk via .swap -> .jsonl
+  ✅ Dispatches UI updates to Thread 0 via invoke_from_event_loop
 ```
 
 ### 3. `&self` Sinks vs `&mut self` Re-entrancy Panic
@@ -154,9 +159,9 @@ For developers coming from Android Studio (XML layouts, Activities, and the impe
 
 | Android Studio (XML + Java/Kotlin) | Slint + Rust Equivalent | Architectural Contrast / What Changed |
 |---|---|---|
-| `res/layout/activity_main.xml` | [`ui/app-window.slint`](file:///home/pirate/development/ai-workflow-gui/ui/app-window.slint) | Both are declarative markup declaring visual elements, layout constraints, and padding. |
+| `res/layout/activity_main.xml` | [`ui/app-window.slint`](ui/app-window.slint) | Both are declarative markup declaring visual elements, layout constraints, and padding. |
 | `R.java` / `ViewBinding` generated class | `slint-build` generated struct in `OUT_DIR` | Both compile markup into typed host-language code at build time. |
-| `MainActivity.java` / `onCreate()` | [`src/main.rs`](file:///home/pirate/development/ai-workflow-gui/src/main.rs) / `fn main()` | The entry point where the window is initialized and callbacks are attached. |
+| `MainActivity.java` / `onCreate()` | [`src/main.rs`](src/main.rs) / `fn main()` | The entry point where the window is initialized and callbacks are attached. |
 | `findViewById(R.id.my_view)` | **NO DIRECT EQUIVALENT** | ⚠️ **The Big Shift:** Slint does NOT expose individual child Views as mutable objects! |
 | `textView.setText("Hello")` (Imperative) | `app.set_status_text("Hello".into())` (Reactive) | Instead of traversing a View tree and mutating it directly, you set a property on the root Component handle. |
 | `button.setOnClickListener(v -> { ... })` | `app.on_send_message(\|msg\| { ... })` | Callbacks are declared on the component root and wired via closures on the generated Rust struct. |
@@ -174,8 +179,8 @@ For developers coming from Android Studio (XML layouts, Activities, and the impe
 | 🛡️ **Fail-Fast Platform Context** | Verified engine refuses to execute without an active `PlatformRuntimeContext`, upholding fail-safe contracts. | ✅ Complete |
 | 📡 **Descriptor Monkey-Patching** | Successfully intercepted Python logging descriptors (`RustGuiEventHandler`, `SlintGuiDisplay`) and routed logs into native Rust MPSC channels. | ✅ Complete |
 | 🎫 **Discrete Ticket In/Out** | Submits discrete `TicketIn` turns, runs full LangGraph routing, and unpacks `TicketOutResult` transcripts with live NVIDIA NIM models. | ✅ Complete |
-| 🧪 **4-Tier Test Harness** | Built an autonomous 4-tier integration test pyramid covering CPython linking, engine boots, log deserialization, and ticket execution. | ✅ Complete |
-| 📚 **Report Protocol Compliance** | Authored 100% compliant technical documentation domains in [`reports/`](file:///home/pirate/development/ai-workflow-gui/reports/) with zero broken links. | ✅ Complete |
+| 🧪 **6-Tier Test Harness** | Built an autonomous 6-tier integration test pyramid covering CPython linking, engine boots, log deserialization, ticket execution, and 144 Hz splash rasterization. | ✅ Complete |
+| 📚 **Report Protocol Compliance** | Authored 100% compliant technical documentation domains in [`reports/README.md`](reports/README.md) with zero broken links. | ✅ Complete |
 
 ---
 
@@ -184,12 +189,12 @@ For developers coming from Android Studio (XML layouts, Activities, and the impe
 | Component | Status | Details |
 |---|:---:|---|
 | 🦀 **Rust Toolchain** | ✅ | Rust 2024 edition, Cargo single-crate architecture |
-| 🎨 **Slint Desktop UI** | ✅ | Slint v1.16.0 with WhatsApp-style alternating bubbles and reactive status dock |
+| 🎨 **Slint Desktop UI** | ✅ | Slint v1.16.0 with WhatsApp-style alternating bubbles, 144 Hz ASCII splash, and 75% telemetry drawer |
 | 🐍 **CPython Engine FFI** | ✅ | PyO3 v0.26.0 embedding Python 3.14.7 (`ai-workflow-task-agent/.venv`) |
-| 🧵 **Dual-Thread Concurrency** | ✅ | Thread 0 (Slint UI Loop) and Thread N (Engine Worker) cleanly decoupled |
+| 🧵 **Three-Thread Concurrency** | ✅ | Thread 0 (UI + 144 Hz timer), Thread 2 (Engine Worker), and Thread 3 (Telemetry & ACID I/O) cleanly decoupled |
 | 📡 **Log Interception Sinks** | ✅ | Native `&self` PyO3 descriptors forwarding into `mpsc::channel` |
-| 🧪 **Integration Test Suite** | ✅ | 4 autonomous test binaries in `tests/`, 100% passing |
-| 📖 **Technical Reports** | ✅ | 6 structured documentation domains in `reports/` |
+| 🧪 **Integration Test Suite** | ✅ | 6 autonomous test binaries in `tests/`, 100% passing |
+| 📖 **Technical Reports** | ✅ | 4 structured system shelves in `reports/` |
 
 ---
 
@@ -201,43 +206,53 @@ For developers coming from Android Studio (XML layouts, Activities, and the impe
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  🦀 SAFE SYSTEMS CORE     ─→  Zero unsafe Rust, RAII memory management   │
-│  🎨 60 FPS GPU RENDERING  ─→  Slint FemtoVG/Qt hardware acceleration    │
-│  ⚡ DUAL-THREAD TOPOLOGY   ─→  Zero GIL execution on UI Thread 0         │
+│  🎨 144 HZ GPU RENDERING  ─→  Slint FemtoVG/Qt hardware acceleration    │
+│  ⚡ 3-THREAD ACTOR MODEL   ─→  Zero GIL on Thread 0, dedicated drainer    │
 │  🐍 HEADLESS AI ENGINE    ─→  Embedded Python 3.14 LangGraph turns       │
 │  🎫 DISCRETE TICKET I/O   ─→  Typed TicketIn prompt → TicketOut reply    │
+│  💾 ACID LOG PERSISTENCE  ─→  Atomic .swap -> .jsonl disk ingestion      │
 │  📡 DESCRIPTOR SINK       ─→  Monkey-patches Python handlers to Rust     │
 │  🧩 ANDROID BRIDGE        ─→  Declarative properties vs imperative views │
-│  🧪 4-TIER TEST PYRAMID   ─→  Autonomous verification at every layer     │
+│  🧪 6-TARGET TEST PYRAMID ─→  Autonomous verification at every layer     │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## ⚡ Dual-Thread Runtime Topology
+## ⚡ Three-Thread OS Actor Concurrency
 
 The interface between native Rust + Slint and the embedded Python agent engine is governed by strict thread isolation:
 
 ```text
-┌─────────────────────────────────────────────────┐
-│              THREAD 0: SLINT UI LOOP            │
-│  • GPU 60 FPS Rendering (FemtoVG / Qt backend)  │
-│  • Window events & User Typing                  │
-│  • Owns AppWindow handle (!Send)                │
-│  • STRICT INVARIANT: ZERO Python GIL execution  │
-└───────────────────────┬─────────────────────────┘
-                        │
-                        │ std::sync::mpsc::channel
-                        │ (WorkerState::CurrentUserMsg)
-                        ▼
-┌─────────────────────────────────────────────────┐
-│            THREAD N: PYO3 WORKER THREAD         │
-│  • Hosts CPython 3.14 Runtime                   │
-│  • Blocks at 0% CPU on mpsc::Receiver           │
-│  • Executes LangGraph turns (TicketIn payload)  │
-│  • Intercepts logs via &self PyO3 descriptors   │
-│  • Schedules UI updates via invoke_from_event   │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│         THREAD 0: SLINT UI LOOP & 144 HZ SPLASH         │
+│  • GPU 144 Hz Rendering (6,944,444 ns frame budget)     │
+│  • Window events & User Typing (1280x720 16:9 scaling)  │
+│  • Owns AppWindow handle (!Send)                        │
+│  • STRICT INVARIANT: ZERO Python GIL execution          │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             │ std::sync::mpsc::sync_channel(1)
+                             │ (WorkerState::CurrentUserMsg)
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│               THREAD 2: PYO3 WORKER ACTOR               │
+│  • Hosts CPython 3.14 Runtime                           │
+│  • Blocks at 0% CPU on sync_channel(1) Receiver         │
+│  • Executes LangGraph turns (TicketIn payload)          │
+│  • Intercepts logs via &self PyO3 descriptors           │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             │ std::sync::mpsc::sync_channel(1024)
+                             │ (GLOBAL_INJECTOR_LOG_ENTRY)
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│         THREAD 3: TELEMETRY & ACID LOG DRAINER          │
+│  • Drains sync_channel(1024) in pure native Rust        │
+│  • Writes atomic ACID .swap -> .jsonl telemetry logs    │
+│  • Schedules UI updates via slint::invoke_from_event    │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -263,44 +278,53 @@ ai-workflow-gui/
 │   ├── tests/test_build_checkup.rs      ✅ Level 0: CPython 3.14 FFI link & virtualenv import verification
 │   ├── tests/test_load_core_boot.rs     ✅ Level 1: ColdWindEngine class extraction & fail-fast boot assertion
 │   ├── tests/test_log_entry_extract.rs  ✅ Level 2: PyO3 event handler monkey-patching & typed LogEntry extraction
-│   └── tests/test_part1_ticket.rs       ✅ Level 3: End-to-end discrete ticket turn execution with LangGraph & NIM LLMs
+│   ├── tests/test_part1_ticket.rs       ✅ Level 3: End-to-end discrete ticket turn execution with LangGraph & NIM LLMs
+│   ├── tests/test_splash_loader.rs      ✅ Level 4: 1,152-frame asset parsing, Fontdue glyph cache, and 144 Hz benchmarks
+│   └── tests/test_splash_on_tui.rs      ✅ Level 5: 24-bit ANSI truecolor terminal ASCII animation playback
 │
 └── 📚 Architecture & Learning Reports
-    ├── reports/README.md            ✅ Documentation domain hub and active status dashboard
-    ├── reports/cross-platform-docs/ ✅ PyO3 0.26+ FFI mechanics, GIL detachment, and concurrency architecture
-    ├── reports/slint_active/        ✅ WhatsApp bubble layouts, reactive properties, and Slint smart pointers
-    └── reports/test_harness/        ✅ 4-tier integration test pyramid deep-dives and verification logs
+    ├── reports/README.md                      ✅ Master documentation catalog and system shelf index
+    ├── reports/system-architecture/README.md  ✅ 3-thread actor runtime, ACID swap persistence, 144 Hz splash, and Slint UI
+    ├── reports/parity-audits/README.md        ✅ GAP-01 to GAP-07 parity tracking comparing Desktop CLI vs. Slint GUI
+    ├── reports/foundations/README.md          ✅ CPython 3.14 FFI/GIL and Slint declarative UI/Android mental bridges
+    └── reports/test-harness/README.md         ✅ 6-tier integration test pyramid deep-dives and 144 Hz benchmarks
 ```
 
 ---
 
-## 🧪 4-Tier Test Harness & Verification Suite
+## 🧪 6-Target Integration Test Pyramid
 
-### 4-Tier Test Pyramid Overview
+### 6-Target Integration Test Pyramid Overview
 
 ```text
                ▲
               / \
-             / L3 \     Level 3: End-to-End Ticket Execution (LangGraph + NIM API)
+             / L5 \     Level 5: Terminal Playback (24-bit ANSI TrueColor TUI)
             /------\
-           /  L2    \    Level 2: Native Logging Sink Interception & Deserialization
+           /  L4    \    Level 4: Asset Parsing & 144 Hz Rasterizer Benchmarks
           /----------\
-         /    L1      \   Level 1: Engine Class Loading & Fail-Fast Boot Assertion
+         /    L3      \   Level 3: End-to-End Ticket Execution (LangGraph + NIM API)
         /--------------\
-       /      L0        \  Level 0: CPython FFI Linkage & Virtualenv Injection
+       /      L2        \  Level 2: Native Logging Sink Interception & Deserialization
       /------------------\
+     /        L1          \ Level 1: Engine Class Loading & Fail-Fast Boot Assertion
+    /----------------------\
+   /          L0            \ Level 0: CPython FFI Linkage & Virtualenv Injection
+  /--------------------------\
 ```
 
 ### Individual Test Binaries & Invariants
 
-Each test file in [`tests/`](file:///home/pirate/development/ai-workflow-gui/tests/) serves as an autonomous behavioral specification:
+Each test file in [`tests/`](tests/) serves as an autonomous behavioral specification:
 
 | Tier | Test Binary | Scope & One-Line Summary | Key Invariants Asserted |
 |:---:|---|---|---|
-| **Level 0** | [`tests/test_build_checkup.rs`](file:///home/pirate/development/ai-workflow-gui/tests/test_build_checkup.rs) | **CPython FFI Link & Virtualenv Check**: Verifies native Python 3.14 linking and loads `coldwind.core` from the injected virtualenv. | Asserts `Python::attach`, `COLDWIND_VENV` presence, and `sys.path` injection. |
-| **Level 1** | [`tests/test_load_core_boot.rs`](file:///home/pirate/development/ai-workflow-gui/tests/test_load_core_boot.rs) | **Engine Handle Extraction & Fail-Fast Check**: Imports `ColdWindEngine` class handle and asserts intentional fail-fast exit when booted without platform context. | Confirms engine refuses to run without an active `PlatformRuntimeContext`. |
-| **Level 2** | [`tests/test_log_entry_extract.rs`](file:///home/pirate/development/ai-workflow-gui/tests/test_log_entry_extract.rs) | **Native Logging Interception & Deserialization**: Replaces Python logging descriptors with native Rust sinks and verifies typed `LogEntry` deserialization. | Validates non-blocking MPSC queuing and recursive `MetaData` JSON decoding. |
-| **Level 3** | [`tests/test_part1_ticket.rs`](file:///home/pirate/development/ai-workflow-gui/tests/test_part1_ticket.rs) | **End-to-End Headless Ticket Execution**: Boots full `SlintRuntime`, dispatches a discrete `/help` `TicketIn`, and asserts LLM response transcript unpacking. | Exercises full LangGraph routing, classifier nodes, and live NVIDIA NIM API calls. |
+| **Level 0** | [`tests/test_build_checkup.rs`](tests/test_build_checkup.rs) | **CPython FFI Link & Virtualenv Check**: Verifies native Python 3.14 linking and loads `coldwind.core` from the injected virtualenv. | Asserts `Python::attach`, `COLDWIND_VENV` presence, and `sys.path` injection. |
+| **Level 1** | [`tests/test_load_core_boot.rs`](tests/test_load_core_boot.rs) | **Engine Handle Extraction & Fail-Fast Check**: Imports `ColdWindEngine` class handle and asserts intentional fail-fast exit when booted without platform context. | Confirms engine refuses to run without an active `PlatformRuntimeContext`. |
+| **Level 2** | [`tests/test_log_entry_extract.rs`](tests/test_log_entry_extract.rs) | **Native Logging Interception & Deserialization**: Replaces Python logging descriptors with native Rust sinks and verifies typed `LogEntry` deserialization. | Validates non-blocking MPSC queuing and recursive `MetaData` JSON decoding. |
+| **Level 3** | [`tests/test_part1_ticket.rs`](tests/test_part1_ticket.rs) | **End-to-End Headless Ticket Execution**: Boots full `SlintRuntime`, dispatches a discrete `/help` `TicketIn`, and asserts LLM response transcript unpacking. | Exercises full LangGraph routing, classifier nodes, and live NVIDIA NIM API calls. |
+| **Level 4** | [`tests/test_splash_loader.rs`](tests/test_splash_loader.rs) | **Splash Asset & Glyph Benchmarks**: Parses 1,152 frames, caches 38 Fontdue glyphs, and benchmarks 720p, 1080p, and 1440p rasterization. | Proves $1280 \times 720$ rasterization takes $5.07\text{ ms}$, locking the 144 Hz ($6.94\text{ ms}$) frame budget. |
+| **Level 5** | [`tests/test_splash_on_tui.rs`](tests/test_splash_on_tui.rs) | **Interactive TUI ASCII Playback**: Renders 1,152 frames in the terminal using 24-bit ANSI truecolor escape codes with `BufWriter`. | Validates flicker-free ANSI terminal rendering at 30 FPS playback pacing. |
 
 ### Running the Test Suite
 
@@ -313,17 +337,23 @@ cargo test
 Execute a specific tier individually:
 
 ```bash
-# Level 0
-cargo test --test test_build_checkup
+# Level 0: CPython FFI Link & Virtualenv Check
+cargo test --test test_build_checkup -- --nocapture
 
-# Level 1
-cargo test --test test_load_core_boot
+# Level 1: Engine Handle Extraction & Fail-Fast Check
+cargo test --test test_load_core_boot -- --nocapture
 
-# Level 2
-cargo test --test test_log_entry_extract
+# Level 2: Native Logging Interception & Deserialization
+cargo test --test test_log_entry_extract -- --nocapture
 
-# Level 3
-cargo test --test test_part1_ticket
+# Level 3: End-to-End Headless Ticket Execution
+cargo test --test test_part1_ticket -- --nocapture
+
+# Level 4: Splash Asset & Glyph Benchmarks
+cargo test --test test_splash_loader -- --nocapture
+
+# Level 5: Interactive TUI ASCII Playback
+cargo test --test test_splash_on_tui -- --nocapture
 ```
 
 ### Why Cargo Runs Integration Tests as Separate Binaries
@@ -390,7 +420,7 @@ LOG_LEVEL=INFO
 LOG_DISPLAY_MODE=slint_gui
 ```
 
-Compile-time PyO3 environment variables are configured in [`.cargo/config.toml`](file:///home/pirate/development/ai-workflow-gui/.cargo/config.toml):
+Compile-time PyO3 environment variables are configured in [`.cargo/config.toml`](.cargo/config.toml):
 
 ```toml
 [env]
@@ -412,7 +442,7 @@ COLDWIND_VENV = "/home/pirate/development/ai-workflow-task-agent/.venv"
 
 ```bash
 # 1. Clone & Enter Directory
-cd /home/pirate/development/ai-workflow-gui
+cd ai-workflow-gui
 
 # 2. Compile Slint UI & Rust Engine Bridge
 cargo build
@@ -428,15 +458,14 @@ cargo run
 
 ## 📚 Documentation Library
 
-All architectural studies and learning notes are maintained in [`reports/`](reports/) adhering to the Report Protocol:
+All architectural studies and learning notes are maintained in [`reports/README.md`](reports/README.md) adhering to the Report Protocol:
 
-| Domain | Directory | Focus & Contents |
-|:---:|---|---|
-| **Domain 1** | [`reports/cross-platform-docs/`](reports/cross-platform-docs/) | PyO3 0.26+ FFI mechanics, GIL lifecycles, and dual-thread concurrency rules |
-| **Domain 2** | [`reports/slint_active/`](reports/slint_active/) | Slint WhatsApp bubble styling, component hierarchies, and reactive property bindings |
-| **Domain 6** | [`reports/test_harness/`](reports/test_harness/) | 4-tier integration test pyramid deep-dives and verification logs |
-| **Domain 7** | [`reports/urgent_development/`](reports/urgent_development/) | Forensic gap audits, concurrency deadlock remediation, telemetry UX parity, and Phase C ACID disk persistence |
-| **Domain 8** | [`reports/docs/`](reports/docs/) | Comprehensive 12-guide codebase library (6 UI component guides + 6 Rust core engine guides) |
+| System Shelf | Directory | Focus & Contents | Status |
+|:---:|---|---|:---:|
+| **System Architecture** | [`reports/system-architecture/README.md`](reports/system-architecture/README.md) | 3-thread actor runtime, ACID `.swap` persistence, 144 Hz ASCII splash, PyO3 FFI, and Slint UI | `VERIFIED` |
+| **Parity Audits** | [`reports/parity-audits/README.md`](reports/parity-audits/README.md) | Forensic gap tracking (`GAP-01`–`GAP-07`) comparing Desktop CLI vs. Slint GUI | `ACTIVE` |
+| **Foundations** | [`reports/foundations/README.md`](reports/foundations/README.md) | First-principles tutorials: CPython 3.14 FFI/GIL and Slint declarative UI/Android mental bridges | `VERIFIED` |
+| **Test Harness** | [`reports/test-harness/README.md`](reports/test-harness/README.md) | 6-tier integration test pyramid deep-dives and 144 Hz (`6.94 ms`) rasterizer benchmarks | `VERIFIED` |
 
 ---
 
@@ -447,7 +476,7 @@ All architectural studies and learning notes are maintained in [`reports/`](repo
 - [x] PyO3 0.26 headless `ColdWindEngine` boot orchestration
 - [x] Python logging descriptor monkey-patching into native Rust MPSC channels
 - [x] End-to-end discrete ticket turn execution with live NVIDIA NIM models
-- [x] 4-tier integration test harness with 100% pass rate
+- [x] 6-target integration test pyramid with 100% pass rate
 
 ### Phase 0.0.2 (Next Milestone — Real-Time GUI Integration)
 - [ ] Connect native MPSC log receiver directly to real-time Slint UI log streaming
