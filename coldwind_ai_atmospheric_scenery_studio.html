@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ColdWind AI — Atmospheric Scenery Studio</title>
+  <!-- Tailwind CSS for responsive studio layout -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- JetBrains Mono for high-density ASCII grid + Inter for clean developer HUD -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-deep: #06050c;
+      --panel-glass: rgba(12, 10, 22, 0.88);
+      --border-muted: rgba(45, 38, 72, 0.85);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background-color: var(--bg-deep);
+      color: #e2e8f0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow-x: hidden;
+    }
+
+    .font-mono-code {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    /* Subtle CRT micro-scanlines for terminal depth without washing out fine glyphs */
+    .scenery-scanlines {
+      background: linear-gradient(
+        rgba(12, 10, 24, 0) 50%,
+        rgba(0, 0, 0, 0.16) 50%
+      );
+      background-size: 100% 3px;
+      pointer-events: none;
+    }
+
+    /* Sleek low-profile range sliders */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: #1e1b33;
+      height: 4px;
+      border-radius: 999px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #f59e0b;
+      cursor: pointer;
+      border: 2px solid #080712;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
+      transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.16);
+      background: #fbbf24;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #f59e0b;
+      cursor: pointer;
+      border: 2px solid #080712;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
+    }
+
+    #controls-hud {
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+
+    #toast-box {
+      transition: opacity 0.22s ease, transform 0.22s ease;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-amber-500/30 selection:text-amber-100">
+
+  <!-- Top Studio Header -->
+  <header class="w-full border-b border-slate-800/80 bg-[#090814]/90 backdrop-blur-md sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
+      <!-- Brand Identity Title -->
+      <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-500/60"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400/80"></span>
+        </div>
+        <div class="h-4 w-[1px] bg-slate-800"></div>
+        <div class="flex items-center gap-2">
+          <span class="font-mono-code text-xs sm:text-sm font-bold tracking-wider text-slate-200">COLDWIND AI</span>
+          <span class="hidden md:inline-block font-mono-code text-[11px] px-2 py-0.5 rounded bg-slate-800/90 text-amber-300/90 border border-slate-700/80">
+            ATMOSPHERIC SCENERY STUDIO
+          </span>
+        </div>
+      </div>
+
+      <!-- Grid Resolution, Loop Length & HUD Toggle -->
+      <div class="flex flex-wrap items-center gap-2 sm:gap-2.5">
+        <!-- Loop Frame Count Selector (3x / 4x / 5x) -->
+        <div class="flex items-center bg-[#070610] border border-slate-800 rounded-lg p-0.5 font-mono-code text-[11px]">
+          <button data-frames="270" class="frames-btn px-2 py-1 rounded-md text-slate-400 hover:text-slate-200 border border-transparent transition cursor-pointer" title="3x Loop (270 frames)">
+            270f
+          </button>
+          <button data-frames="360" class="frames-btn px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/35 transition cursor-pointer" title="4x Loop (360 frames · Default)">
+            360f
+          </button>
+          <button data-frames="450" class="frames-btn px-2 py-1 rounded-md text-slate-400 hover:text-slate-200 border border-transparent transition cursor-pointer" title="5x Loop (450 frames)">
+            450f
+          </button>
+        </div>
+
+        <!-- Grid Density Selector -->
+        <div class="flex items-center bg-[#070610] border border-slate-800 rounded-lg p-0.5 font-mono-code text-[11px]">
+          <button data-res="128x52" class="res-btn px-2 py-1 rounded-md text-slate-400 hover:text-slate-200 border border-transparent transition cursor-pointer">
+            128×52
+          </button>
+          <button data-res="160x64" class="res-btn px-2 py-1 rounded-md bg-sky-500/15 text-sky-300 border border-sky-500/35 transition cursor-pointer">
+            160×64
+          </button>
+          <button data-res="192x76" class="res-btn px-2 py-1 rounded-md text-slate-400 hover:text-slate-200 border border-transparent transition cursor-pointer">
+            192×76
+          </button>
+        </div>
+
+        <button id="btn-toggle-hud" class="font-mono-code text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800/85 hover:bg-slate-700/80 text-slate-300 border border-slate-700/80 transition cursor-pointer">
+          Hide UI
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 w-full max-w-7xl mx-auto px-2.5 sm:px-6 py-3 sm:py-5 flex flex-col gap-3.5">
+
+    <!-- High-Density Atmospheric Scenery Viewport -->
+    <section class="relative w-full rounded-2xl border border-slate-800/90 bg-[#080712] shadow-2xl shadow-black/80 overflow-hidden">
+      <!-- Telemetry Status Strip -->
+      <div class="flex items-center justify-between px-3.5 py-1.5 border-b border-slate-800/75 bg-[#0b0917] font-mono-code text-[11px] text-slate-400">
+        <div class="flex items-center gap-2 truncate">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400/90 animate-pulse"></span>
+          <span id="hud-scene-label" class="text-slate-200 font-medium">Kyoto Dusk</span>
+          <span class="text-slate-600">•</span>
+          <span id="hud-grid-label" class="hidden sm:inline text-slate-400">160×64 @ 45 FPS</span>
+        </div>
+        <div class="flex items-center gap-2.5 shrink-0">
+          <span id="hud-brand-label" class="hidden md:inline text-slate-400">Tethered AI Banner</span>
+          <span class="hidden md:inline text-slate-700">|</span>
+          <span id="hud-frame-counter" class="text-amber-300/95 font-medium">Frame 001 / 360 · 8.0s</span>
+        </div>
+      </div>
+
+      <!-- Canvas Stage -->
+      <div id="canvas-wrapper" class="relative w-full flex items-center justify-center p-1.5 sm:p-3 bg-[#080712]">
+        <canvas id="ascii-canvas" class="block rounded-xl max-w-full"></canvas>
+        <div class="scenery-scanlines absolute inset-0 rounded-xl"></div>
+      </div>
+    </section>
+
+    <!-- Collapsible Developer HUD & Export Dock -->
+    <section id="controls-hud" class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+
+      <!-- Left Dock: Mood Presets, Brand Display Modes & Physics Sliders (8 cols) -->
+      <div class="lg:col-span-8 rounded-2xl border border-slate-800/90 bg-[#0c0a17]/90 backdrop-blur-md p-3.5 sm:p-4 flex flex-col gap-3.5">
+
+        <!-- Row 1: Mood Presets + Brand Mode Selector + Playback Scrubber -->
+        <div class="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-800/75">
+          <!-- 3 Atmospheric Mood Presets (Kyoto Dusk default) -->
+          <div class="flex flex-wrap items-center gap-1.5 font-mono-code text-xs">
+            <button data-preset="kyoto" class="preset-btn px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/35 transition cursor-pointer">
+              Kyoto Dusk
+            </button>
+            <button data-preset="storm" class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer">
+              Storm Plains
+            </button>
+            <button data-preset="arctic" class="preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer">
+              Arctic Mist
+            </button>
+          </div>
+
+          <!-- 3 Brand Display Modes -->
+          <div class="flex flex-wrap items-center gap-1.5 font-mono-code text-xs">
+            <button data-brand="wordmark" class="brand-btn px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-600/80 transition cursor-pointer">
+              Tethered AI Banner
+            </button>
+            <button data-brand="minimal" class="brand-btn px-2.5 py-1.5 rounded-lg bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer">
+              Minimal Tag
+            </button>
+            <button data-brand="scenery" class="brand-btn px-2.5 py-1.5 rounded-lg bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer">
+              Pure Scenery
+            </button>
+          </div>
+
+          <!-- Playback Controls + Seamless Loop Scrubber -->
+          <div class="flex items-center gap-1.5 font-mono-code text-xs">
+            <button id="btn-play-pause" class="px-2.5 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700/80 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition cursor-pointer">
+              <span id="icon-play-pause">❚❚</span>
+              <span id="label-play-pause">Pause</span>
+            </button>
+            <button id="btn-step" title="Advance 1 Frame" class="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition cursor-pointer">
+              +1f
+            </button>
+            <input id="slider-frame" type="range" min="0" max="359" step="1" value="0" title="Scrub Seamless Loop" class="w-16 sm:w-24 ml-1" />
+          </div>
+        </div>
+
+        <!-- Row 2: 4 Fine-Grained Atmospheric Physics Sliders -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5 font-mono-code text-[11px] sm:text-xs">
+          <!-- Frame Rate (Default 45 FPS — 3x smoother) -->
+          <div class="flex flex-col gap-1.5">
+            <div class="flex justify-between text-slate-400">
+              <span>SMOOTHNESS</span>
+              <span id="val-fps" class="text-amber-300 font-semibold">45 FPS</span>
+            </div>
+            <input id="slider-fps" type="range" min="15" max="60" step="1" value="45" class="w-full" />
+          </div>
+
+          <!-- Wind Gust Intensity -->
+          <div class="flex flex-col gap-1.5">
+            <div class="flex justify-between text-slate-400">
+              <span>WIND GUST</span>
+              <span id="val-wind" class="text-sky-300 font-semibold">1.0×</span>
+            </div>
+            <input id="slider-wind" type="range" min="0.5" max="2.5" step="0.25" value="1.0" class="w-full" />
+          </div>
+
+          <!-- Leaf Density -->
+          <div class="flex flex-col gap-1.5">
+            <div class="flex justify-between text-slate-400">
+              <span>LEAVES</span>
+              <span id="val-leaves" class="text-amber-300/90 font-semibold">48</span>
+            </div>
+            <input id="slider-leaves" type="range" min="30" max="70" step="2" value="48" class="w-full" />
+          </div>
+
+          <!-- Cloud Cover -->
+          <div class="flex flex-col gap-1.5">
+            <div class="flex justify-between text-slate-400">
+              <span>CLOUDS</span>
+              <span id="val-clouds" class="text-indigo-300 font-semibold">62%</span>
+            </div>
+            <input id="slider-clouds" type="range" min="20" max="90" step="2" value="62" class="w-full" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Dock: Non-Blocking Developer Exports (4 cols) -->
+      <div class="lg:col-span-4 rounded-2xl border border-slate-800/90 bg-[#0c0a17]/90 backdrop-blur-md p-3.5 sm:p-4 flex flex-col justify-between gap-3">
+        <div class="flex items-center justify-between">
+          <span class="font-mono-code text-xs font-semibold tracking-wider text-slate-300 uppercase">Asset Pipeline</span>
+          <span id="badge-loop-lock" class="font-mono-code text-[11px] text-amber-300/80">360f · 8.0s Lock</span>
+        </div>
+
+        <p class="text-xs text-slate-400 leading-relaxed">
+          Bake seamless <span id="desc-frame-count" class="text-slate-200 font-mono-code">360-frame</span> scenery into <span class="text-slate-200 font-mono-code">JSON</span> for Slint/Python TUI, or <span class="text-slate-200 font-mono-code">SVG</span> for GitHub README.
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-2 font-mono-code text-[11px]">
+          <button id="btn-export-json" class="px-2.5 py-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 font-medium flex items-center justify-center gap-1.5 transition cursor-pointer">
+            <span>{ }</span>
+            <span>Export JSON</span>
+          </button>
+
+          <button id="btn-export-svg" class="px-2.5 py-2.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 font-medium flex items-center justify-center gap-1.5 transition cursor-pointer">
+            <span>◈</span>
+            <span>Export SVG</span>
+          </button>
+
+          <button id="btn-copy-frame" class="px-2.5 py-2.5 rounded-lg bg-slate-800/90 hover:bg-slate-700/80 text-slate-200 border border-slate-700 font-medium flex items-center justify-center gap-1.5 transition cursor-pointer">
+            <span>⎘</span>
+            <span>Copy Frame</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Floating Toast Feedback (Replaces alert() cleanly) -->
+  <div id="toast-box" class="fixed bottom-5 right-5 z-50 opacity-0 translate-y-2 pointer-events-none">
+    <div class="px-4 py-2.5 rounded-xl bg-[#100d1f] border border-amber-500/40 shadow-2xl shadow-black/80 flex items-center gap-2.5 font-mono-code text-xs text-amber-100">
+      <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+      <span id="toast-text">Ready</span>
+    </div>
+  </div>
+
+  <!-- Hidden textarea for iframe-safe clipboard copy -->
+  <textarea id="clipboard-helper" class="sr-only" aria-hidden="true"></textarea>
+
+  <script>
+    /**
+     * ColdWind AI — Atmospheric Scenery Engine (3x Smoothness · 360-Frame Seamless Loop)
+     *
+     * Architecture Guarantees:
+     * 1. Zero Syntax Errors: Pure ES6+, strictly balanced blocks, no raw closing tags in strings.
+     * 2. Exact Periodic Loop: Every cyclic phase computes `u = frame / totalFrames` in [0, 1)
+     *    and multiplies `theta = u * Math.PI * 2` by exact integers so the last frame wraps
+     *    back into frame 0 with zero jump or seam.
+     * 3. Aerodynamic Tow-Rope & Cloth 'AI' Banner: Solid frosted 'COLDWIND' anchor pinned in
+     *    the upper-mid dusk sky with a flexible ASCII tow-rope and 3-row woven 'AI' cloth
+     *    banner animated across X-drag, Y-traveling wave, and simulated Z-fold depth shading.
+     */
+
+    // 3 Curated Atmospheric Mood Presets (Kyoto Dusk default)
+    const MOOD_PRESETS = {
+      kyoto: {
+        name: "Kyoto Dusk",
+        skyTop: [13, 10, 20],       // #0d0a14
+        skyHorizon: [26, 18, 44],   // #1a122c
+        mistColors: ["#231a3d", "#312454", "#41306e"],
+        cloudShades: [
+          "#17132b", "#1f1938", "#272045", "#302753", "#392f61",
+          "#433870", "#4d417e", "#574a8c", "#625499", "#6e60a6"
+        ],
+        windThreadColors: ["#372c59", "#51417d", "#725cab"],
+        leafColors: ["#f59e0b", "#fbbf24", "#f43f5e", "#cbd5e1"],
+        grassShadow: "#141026",
+        grassMid: "#272042",
+        grassHighlight: "#54477d",
+        grassCrest: "#f59e0b",
+        earthBase: "#0b0917",
+        brandBase: "#9e95b8",
+        brandMid: "#cdc6e0",
+        brandPeak: "#ede9fe",
+        brandBadge: "#f59e0b",
+        ropeBase: "#8b7fb0",
+        ropeHighlight: "#c4b5fd",
+        clothShades: ["#78350f", "#b45309", "#d97706", "#f59e0b", "#fde68a"]
+      },
+      storm: {
+        name: "Storm Plains",
+        skyTop: [6, 9, 17],         // #060911
+        skyHorizon: [12, 20, 36],   // #0c1424
+        mistColors: ["#152036", "#1e2d4a", "#2b3f63"],
+        cloudShades: [
+          "#11192b", "#162138", "#1c2944", "#233352", "#2b3e61",
+          "#344970", "#3e5680", "#496390", "#526e9c", "#5b76a3"
+        ],
+        windThreadColors: ["#253654", "#3b5278", "#5b79a6"],
+        leafColors: ["#cbd5e1", "#94a3b8", "#d4a359", "#7dd3fc"],
+        grassShadow: "#101b29",
+        grassMid: "#1e3448",
+        grassHighlight: "#5b89a6",
+        grassCrest: "#bae6fd",
+        earthBase: "#090f18",
+        brandBase: "#94a3b8",
+        brandMid: "#cbd5e1",
+        brandPeak: "#e2e8f0",
+        brandBadge: "#7dd3fc",
+        ropeBase: "#64748b",
+        ropeHighlight: "#94a3b8",
+        clothShades: ["#1e3a5f", "#0284c7", "#38bdf8", "#7dd3fc", "#e0f2fe"]
+      },
+      arctic: {
+        name: "Arctic Mist",
+        skyTop: [7, 11, 18],        // #070b12
+        skyHorizon: [13, 22, 34],   // #0d1622
+        mistColors: ["#132133", "#1b2e45", "#253e5c"],
+        cloudShades: [
+          "#0f1724", "#141f30", "#1a283d", "#21324b", "#293d59",
+          "#324969", "#3c5678", "#48648a", "#56749c", "#6785ad"
+        ],
+        windThreadColors: ["#1e324a", "#325273", "#5682ab"],
+        leafColors: ["#38bdf8", "#7dd3fc", "#cbd5e1", "#e2e8f0"],
+        grassShadow: "#0e1824",
+        grassMid: "#1a2d42",
+        grassHighlight: "#38bdf8",
+        grassCrest: "#e0f2fe",
+        earthBase: "#080e17",
+        brandBase: "#7dd3fc",
+        brandMid: "#bae6fd",
+        brandPeak: "#f0f9ff",
+        brandBadge: "#38bdf8",
+        ropeBase: "#527194",
+        ropeHighlight: "#93c5fd",
+        clothShades: ["#1e3a5f", "#2563eb", "#38bdf8", "#bae6fd", "#ffffff"]
+      }
+    };
+
+    // Solid Frosted 'COLDWIND' Fuselage Anchor (56 cols x 5 rows)
+    const COLDWIND_ANCHOR = [
+      "▄████  ▄███▄  ██     █████▄  ██    ██ ██ ███  ██ █████▄ ",
+      "██    ██   ██ ██     ██   ██ ██    ██ ██ ████ ██ ██   ██",
+      "██    ██   ██ ██     ██   ██ ██ ██ ██ ██ ██ ████ ██   ██",
+      "██    ██   ██ ██     ██   ██ ███  ███ ██ ██  ███ ██   ██",
+      "▀████  ▀███▀  ██████ █████▀  ██    ██ ██ ██   ██ █████▀ "
+    ];
+
+    const MINIMAL_TAG_LINE = "// COLDWIND AI  •  ATMOSPHERIC WORKFLOW ENGINE";
+
+    // Studio State (Kyoto Dusk, 45 FPS, 360 Frames = 8.0s Seamless Loop)
+    const state = {
+      cols: 160,
+      rows: 64,
+      fps: 45,
+      totalFrames: 360,
+      windGust: 1.0,
+      leafDensity: 48,
+      cloudCover: 62,
+      presetKey: "kyoto",
+      brandMode: "wordmark", // 'wordmark' | 'minimal' | 'scenery'
+      hudVisible: true,
+      isPlaying: true,
+      isExporting: false,
+      currentFrame: 0,
+      lastTimestamp: 0
+    };
+
+    // Deterministic Mulberry32 PRNG for reproducible, jitter-free scenery placement
+    function mulberry32(seed) {
+      return function () {
+        let t = (seed += 0x6d2b79f5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // Linearly interpolate two [R, G, B] triples into a hex string
+    function lerpRgbHex(rgbA, rgbB, alpha) {
+      const t = Math.max(0, Math.min(1, alpha));
+      const r = Math.round(rgbA[0] + (rgbB[0] - rgbA[0]) * t);
+      const g = Math.round(rgbA[1] + (rgbB[1] - rgbA[1]) * t);
+      const b = Math.round(rgbA[2] + (rgbB[2] - rgbA[2]) * t);
+      return (
+        "#" +
+        r.toString(16).padStart(2, "0") +
+        g.toString(16).padStart(2, "0") +
+        b.toString(16).padStart(2, "0")
+      );
+    }
+
+    // Pre-seeded Scene Entity Pools
+    let mistSpecks = [];
+    let leaves = [];
+    let windThreads = [];
+    let grassColumns = [];
+
+    function rebuildSceneEntities() {
+      const rand = mulberry32(90210);
+
+      // 1. Sparse twinkling mist specks across upper/mid sky
+      mistSpecks = [];
+      for (let i = 0; i < 72; i++) {
+        mistSpecks.push({
+          xNorm: rand(),
+          yNorm: rand() * 0.72,
+          freqT: 2 + Math.floor(rand() * 4), // Integer harmonic over loop
+          phase: rand() * Math.PI * 2,
+          glyph: rand() > 0.45 ? "·" : ".",
+          shadeIdx: Math.floor(rand() * 3)
+        });
+      }
+
+      // 2. Faint gossamer wind ribbons gliding across mid-sky
+      windThreads = [];
+      for (let i = 0; i < 16; i++) {
+        windThreads.push({
+          startXNorm: rand(),
+          yNorm: 0.14 + rand() * 0.56,
+          length: 9 + Math.floor(rand() * 14),
+          cyclesX: 1 + Math.floor(rand() * 2), // 1 or 2 full wraps per 8s loop
+          waveFreq: 2 + Math.floor(rand() * 3),
+          waveAmp: 0.7 + rand() * 1.1,
+          phase: rand() * Math.PI * 2,
+          shadeIdx: Math.floor(rand() * 3)
+        });
+      }
+
+      // 3. Kyoto-Dusk 2D curl-eddy swirling leaves
+      const glyphSets = [
+        ["❧", "~", "❦", "'"],
+        ["❦", "'", "~", ","],
+        ["~", "'", ",", "."],
+        ["'", "~", "❧", "."]
+      ];
+      leaves = [];
+      for (let i = 0; i < 70; i++) {
+        leaves.push({
+          startXNorm: rand(),
+          startYNorm: 0.08 + rand() * 0.84,
+          cyclesX: 1 + Math.floor(rand() * 2), // Calm 1–2 horizontal wraps per loop
+          eddyFreq1: 2 + Math.floor(rand() * 2),
+          eddyFreq2: 4 + Math.floor(rand() * 2),
+          eddyAmpX: 2.5 + rand() * 4.5,
+          eddyAmpY: 1.5 + rand() * 3.0,
+          phase1: rand() * Math.PI * 2,
+          phase2: rand() * Math.PI * 2,
+          tumbleCycles: 4 + Math.floor(rand() * 5),
+          tumbleOffset: Math.floor(rand() * 4),
+          glyphSet: glyphSets[i % glyphSets.length],
+          colorIdx: Math.floor(rand() * 4)
+        });
+      }
+
+      // 4. Storm-Plains grass/wheat column micro-variations
+      const tipVariants = ["'", "|", ".", "`"];
+      grassColumns = [];
+      for (let i = 0; i < 240; i++) {
+        grassColumns.push({
+          heightOffset: Math.floor(rand() * 3) - 1,
+          phaseOffset: rand() * 1.4,
+          tipVariant: tipVariants[Math.floor(rand() * tipVariants.length)]
+        });
+      }
+    }
+
+    /**
+     * Compute a single complete frame grid of size [rows][cols]
+     * Every cell is `{ c: string, rgb: string }`.
+     */
+    function computeFrameGrid(frameIdx) {
+      const { cols, rows, totalFrames, windGust, leafDensity, cloudCover, presetKey, brandMode } = state;
+      const theme = MOOD_PRESETS[presetKey];
+
+      // Normalized seamless loop phase u in [0, 1) and angular phase theta in [0, 2*PI)
+      const safeFrame = ((frameIdx % totalFrames) + totalFrames) % totalFrames;
+      const u = safeFrame / totalFrames;
+      const theta = u * Math.PI * 2;
+
+      // Initialize empty character grid
+      const grid = new Array(rows);
+      for (let r = 0; r < rows; r++) {
+        const rowArr = new Array(cols);
+        for (let c = 0; c < cols; c++) {
+          rowArr[c] = { c: " ", rgb: "#000000" };
+        }
+        grid[r] = rowArr;
+      }
+
+      const put = (r, c, ch, rgb) => {
+        if (r >= 0 && r < rows && c >= 0 && c < cols && ch !== " ") {
+          grid[r][c] = { c: ch, rgb };
+        }
+      };
+
+      // --- LAYER 1: Subtle Twinkling Twilight Mist ---
+      for (let i = 0; i < mistSpecks.length; i++) {
+        const m = mistSpecks[i];
+        const pulse = Math.sin(theta * m.freqT + m.phase);
+        if (pulse > 0.15) {
+          const col = Math.floor(m.xNorm * cols);
+          const row = Math.floor(m.yNorm * rows);
+          put(row, col, m.glyph, theme.mistColors[m.shadeIdx]);
+        }
+      }
+
+      // --- LAYER 2: Volumetric Drifting Clouds (Upper 74% of Sky) ---
+      const skyLimitRow = Math.floor(rows * 0.74);
+      const coverBias = (cloudCover - 50) / 100; // -0.30 to +0.40
+      const cloudGlyphs = ["·", ":", "~", "░", "▒"];
+
+      for (let r = 0; r < skyLimitRow; r++) {
+        const yNorm = r / skyLimitRow;
+        // Fade clouds out near the very top edge and near the meadow horizon
+        const verticalMask = Math.sin(yNorm * Math.PI) * (1.08 - yNorm * 0.35);
+
+        for (let c = 0; c < cols; c++) {
+          const xNorm = c / cols;
+          // Exact integer spatial & temporal cycles -> zero seam at frame 0/totalFrames
+          const ax1 = (xNorm * 2 - u * 1) * Math.PI * 2;
+          const ax2 = (xNorm * 4 - u * 2) * Math.PI * 2;
+          const ax3 = (xNorm * 7 - u * 3) * Math.PI * 2;
+          const ay1 = yNorm * Math.PI * 3.2;
+          const ay2 = yNorm * Math.PI * 6.5;
+
+          const warp = 0.25 * Math.sin(ax2 + ay1);
+          const n1 = Math.sin(ax1 + warp) * Math.cos(ay1 - 0.4);
+          const n2 = 0.55 * Math.sin(ax2 - 0.9) * Math.sin(ay2 + 0.7);
+          const n3 = 0.25 * Math.cos(ax3 + ay2);
+
+          const rawDensity = (n1 + n2 + n3) / 1.8; // roughly -1..1
+          const density = rawDensity * 0.5 + 0.5 + coverBias - (1 - verticalMask) * 0.38;
+
+          if (density > 0.46) {
+            const normD = Math.min(0.999, (density - 0.46) / 0.54);
+            const glyphIdx = Math.floor(normD * cloudGlyphs.length);
+            const shadeIdx = Math.floor(normD * theme.cloudShades.length);
+            put(r, c, cloudGlyphs[glyphIdx], theme.cloudShades[shadeIdx]);
+          }
+        }
+      }
+
+      // --- LAYER 3A: Faint Curved Wind Threads ---
+      for (let i = 0; i < windThreads.length; i++) {
+        const wt = windThreads[i];
+        const headX = ((wt.startXNorm + u * wt.cyclesX) % 1) * cols;
+        const baseY = wt.yNorm * (rows * 0.72);
+
+        for (let k = 0; k < wt.length; k++) {
+          const frac = k / wt.length;
+          const col = (Math.floor(headX - k) + cols * 2) % cols;
+          const rippleY =
+            Math.sin(frac * Math.PI * wt.waveFreq + theta * 2 + wt.phase) *
+            wt.waveAmp *
+            (0.6 + windGust * 0.35);
+          const row = Math.round(baseY + rippleY);
+          const ch = k === 0 ? "·" : frac > 0.75 ? "-" : "~";
+          put(row, col, ch, theme.windThreadColors[wt.shadeIdx]);
+        }
+      }
+
+      // --- LAYER 5: Solid 'COLDWIND' Anchor + Tow-Rope + Fluttering 'AI' Cloth Banner ---
+      if (brandMode === "wordmark") {
+        const wmH = COLDWIND_ANCHOR.length;
+        const wmW = COLDWIND_ANCHOR[0].length;
+        const totalAssemblyW = wmW + 19; // Anchor + knot + tow-rope + fluttering AI cloth banner
+        const startRow = Math.max(5, Math.floor(rows * 0.27));
+        const startCol = Math.max(2, Math.floor((cols - totalAssemblyW) / 2));
+
+        // Soft mist halo: thin out dense cloud blocks behind the anchor & fluttering banner zone
+        for (let r = startRow - 2; r <= startRow + wmH + 2; r++) {
+          for (let c = startCol - 3; c <= startCol + totalAssemblyW + 3; c++) {
+            if (r >= 0 && r < rows && c >= 0 && c < cols) {
+              const existing = grid[r][c].c;
+              if (existing === "▒" || existing === "░" || existing === "~") {
+                grid[r][c] = { c: "·", rgb: theme.mistColors[0] };
+              }
+            }
+          }
+        }
+
+        // 1. Solid 'COLDWIND' Fuselage Anchor (steady, subtle frosted shimmer)
+        const shimmerX = u * (wmW + 32) - 16;
+        for (let lr = 0; lr < wmH; lr++) {
+          const line = COLDWIND_ANCHOR[lr];
+          for (let lc = 0; lc < line.length; lc++) {
+            const ch = line[lc];
+            if (ch === " ") continue;
+            const dist = Math.abs(lc - lr * 1.2 - shimmerX);
+            let color = theme.brandBase;
+            if (dist < 4.5) color = theme.brandPeak;
+            else if (dist < 10.5) color = theme.brandMid;
+            put(startRow + lr, startCol + lc, ch, color);
+          }
+        }
+
+        // 2. Aerodynamic Fluid Drag & Surge (exact integer harmonics over 360-frame loop)
+        const gustSurge = Math.sin(theta * 3 - 0.55) * 0.65 + Math.sin(theta * 5 + 0.3) * 0.35;
+        const effectiveWind = Math.max(0.4, windGust + gustSurge * 0.28 * windGust);
+        // Tow-rope tautens/extends between 5 and 6 cells under wind drag
+        const ropeLen = effectiveWind > 1.05 ? 6 : 5;
+        const tautness = Math.min(1.0, (effectiveWind - 0.4) / 2.1);
+
+        // Attachment knot pinned on the right edge of 'D' (middle row of COLDWIND)
+        const knotRow = startRow + 2;
+        const knotCol = startCol + wmW;
+        put(knotRow, knotCol, "•", theme.ropeHighlight);
+
+        // Continuous rope displacement yRopeExact(s) pinned at s=0 (zero displacement at knot)
+        const ropeSagAmp = 1.02 - tautness * 0.66;
+        const ropeWaveAmp = 0.44 + windGust * 0.42;
+        const yRopeExact = (s) => {
+          const catenary = Math.sin(Math.PI * s) * ropeSagAmp;
+          const whip =
+            Math.pow(s, 1.35) *
+            ropeWaveAmp *
+            (0.72 * Math.sin(s * 3.4 - theta * 5) + 0.28 * Math.sin(s * 6.2 - theta * 9 + 0.8));
+          return catenary + whip;
+        };
+
+        // Render flexible ASCII tow-rope cells
+        for (let i = 0; i < ropeLen; i++) {
+          const s = (i + 1) / (ropeLen + 1);
+          const sPrev = i / (ropeLen + 1);
+          const sNext = (i + 2) / (ropeLen + 1);
+
+          const yCurr = yRopeExact(s);
+          const dy = yRopeExact(sNext) - yRopeExact(sPrev);
+          const rowOffset = Math.round(yCurr);
+          const fracY = yCurr - rowOffset;
+
+          let ropeGlyph = "-";
+          if (dy > 0.36) ropeGlyph = "\\";
+          else if (dy < -0.36) ropeGlyph = "/";
+          else if (Math.abs(dy) > 0.18) ropeGlyph = "~";
+          else if (fracY < -0.22) ropeGlyph = "¯";
+          else if (fracY > 0.22) ropeGlyph = "_";
+
+          const ropeColor = tautness > 0.55 && i % 2 === 0 ? theme.ropeHighlight : theme.ropeBase;
+          put(knotRow + rowOffset, knotCol + 1 + i, ropeGlyph, ropeColor);
+        }
+
+        // 3. Fluttering Woven Cloth 'AI' Banner (X-drag, Y-traveling wave, Z-depth fold shading)
+        const bannerStartCol = knotCol + 1 + ropeLen;
+        const bridleY = yRopeExact(1.0);
+        const clothW = 7; // uIdx = 0..6 (bridle + woven 'AI' cloth + trailing edge)
+        const tailW = 3;  // uIdx = 7..9 (whipping split tail streamers)
+        const totalBannerCols = clothW + tailW;
+
+        const waveK1 = 0.78;
+        const waveK2 = 1.48;
+        const clothBaseAmp = 0.48 + windGust * 0.48;
+
+        // Traveling vertical cloth wave across column index uIdx
+        const yClothExact = (uIdx) => {
+          const env = 0.28 + 0.92 * Math.pow(uIdx / totalBannerCols, 1.12);
+          const phase1 = waveK1 * uIdx - theta * 5;
+          const phase2 = waveK2 * uIdx - theta * 9 + 1.1;
+          return bridleY + clothBaseAmp * env * (0.74 * Math.sin(phase1) + 0.26 * Math.sin(phase2));
+        };
+
+        const colYProfile = [];
+        for (let uIdx = 0; uIdx <= totalBannerCols; uIdx++) {
+          colYProfile.push(yClothExact(uIdx));
+        }
+
+        // Render 3-row woven cloth banner (uIdx = 0..6)
+        const midClothGlyphs = ["├", " ", "A", " ", "I", " ", "┤"];
+        for (let uIdx = 0; uIdx < clothW; uIdx++) {
+          const col = bannerStartCol + uIdx;
+          const yCurr = colYProfile[uIdx];
+          const yPrev = uIdx > 0 ? colYProfile[uIdx - 1] : yRopeExact(ropeLen / (ropeLen + 1));
+          const yNext = colYProfile[uIdx + 1];
+          const slope = (yNext - yPrev) * 0.5;
+          const rowShift = Math.round(yCurr);
+          const fracY = yCurr - rowShift;
+
+          // Simulated Z-axis fabric fold normal & depth shading
+          const phase1 = waveK1 * uIdx - theta * 5;
+          const zNormal = Math.cos(phase1); // +1 = forward crest catching dusk light, -1 = Z-fold shadow
+          const zDepth = Math.sin(phase1 - 0.45);
+          const shadeNorm = Math.max(0, Math.min(0.999, (zNormal * 0.65 + zDepth * 0.35 + 1) * 0.5));
+          const shadeIdx = Math.floor(shadeNorm * theme.clothShades.length);
+          const clothColor = theme.clothShades[shadeIdx];
+
+          // Top & bottom cloth hems dynamically morph with wave slope & sub-cell elevation
+          let hemGlyph = "─";
+          if (uIdx === 0) {
+            hemGlyph = "┌";
+          } else if (uIdx === clothW - 1) {
+            hemGlyph = "┐";
+          } else if (slope > 0.34) {
+            hemGlyph = "\\";
+          } else if (slope < -0.34) {
+            hemGlyph = "/";
+          } else if (Math.abs(slope) > 0.16) {
+            hemGlyph = "~";
+          } else if (fracY < -0.22) {
+            hemGlyph = "¯";
+          } else if (fracY > 0.22) {
+            hemGlyph = "_";
+          }
+
+          const botHemGlyph = uIdx === 0 ? "└" : uIdx === clothW - 1 ? "┘" : hemGlyph;
+
+          // Top hem (rowShift - 1)
+          put(knotRow - 1 + rowShift, col, hemGlyph, clothColor);
+
+          // Middle woven fabric + 'AI' lettering (rowShift)
+          let midCh = midClothGlyphs[uIdx];
+          let midColor = clothColor;
+          if (midCh === "A" || midCh === "I") {
+            // Keep 'AI' crisp and legible while still catching Z-crest highlights
+            midColor = theme.clothShades[Math.max(2, shadeIdx)];
+          } else if (midCh === " " && zDepth < -0.42) {
+            // Subtle Z-fold shadow crease inside empty cloth weave
+            midCh = ":";
+            midColor = theme.clothShades[0];
+          }
+          put(knotRow + rowShift, col, midCh, midColor);
+
+          // Bottom hem (rowShift + 1)
+          put(knotRow + 1 + rowShift, col, botHemGlyph, clothColor);
+        }
+
+        // Render whipping split tail streamers (uIdx = clothW .. totalBannerCols - 1)
+        const streamerGlyphs = ["~", "-", "'"];
+        for (let tIdx = 0; tIdx < tailW; tIdx++) {
+          const uIdx = clothW + tIdx;
+          const col = bannerStartCol + uIdx;
+          const yCurr = colYProfile[uIdx];
+          const rowShift = Math.round(yCurr);
+          const phase1 = waveK1 * uIdx - theta * 5;
+          const shadeIdx = Math.max(
+            0,
+            Math.min(
+              theme.clothShades.length - 1,
+              Math.floor(((Math.cos(phase1) + 1) * 0.5) * theme.clothShades.length)
+            )
+          );
+          const tailColor = theme.clothShades[shadeIdx];
+          const gTop = streamerGlyphs[(tIdx + Math.floor(u * 15)) % streamerGlyphs.length];
+          const gBot = streamerGlyphs[(tIdx + 1 + Math.floor(u * 15)) % streamerGlyphs.length];
+
+          put(knotRow - 1 + rowShift, col, gTop, tailColor);
+          put(knotRow + 1 + rowShift, col, gBot, tailColor);
+        }
+
+        // Subtle wake air-ripples trailing behind the fluttering banner tail
+        const wakeCol = bannerStartCol + totalBannerCols + 1;
+        const wakeRow = knotRow + Math.round(colYProfile[totalBannerCols]);
+        if (Math.sin(theta * 5) > -0.2) {
+          put(wakeRow, wakeCol, "·", theme.windThreadColors[1]);
+        }
+        if (Math.cos(theta * 5) > 0.1) {
+          put(wakeRow + (Math.sin(theta * 5) > 0 ? -1 : 1), wakeCol + 2, "~", theme.windThreadColors[0]);
+        }
+      } else if (brandMode === "minimal") {
+        const tagRow = Math.max(4, Math.floor(rows * 0.30));
+        const tagCol = Math.max(2, Math.floor((cols - MINIMAL_TAG_LINE.length) / 2));
+        for (let i = 0; i < MINIMAL_TAG_LINE.length; i++) {
+          const ch = MINIMAL_TAG_LINE[i];
+          const isBadge = i >= 12 && i <= 14; // "AI"
+          put(tagRow, tagCol + i, ch, isBadge ? theme.brandBadge : theme.brandMid);
+        }
+      }
+
+      // --- LAYER 3B: Kyoto-Dusk 2D Curl-Eddy Swirling Leaves ---
+      const activeLeaves = leaves.slice(0, leafDensity);
+      const eddyScale = 0.65 + windGust * 0.45;
+
+      for (let i = 0; i < activeLeaves.length; i++) {
+        const lf = activeLeaves[i];
+        const baseX = ((lf.startXNorm + u * lf.cyclesX) % 1) * cols;
+        const baseY = lf.startYNorm * (rows * 0.78);
+
+        // 2D harmonic curl turbulence: leaves slow down in air pockets, swirl, and drift
+        const eddyX =
+          (Math.cos(lf.eddyFreq1 * theta + lf.phase1) * lf.eddyAmpX +
+            Math.sin(lf.eddyFreq2 * theta + lf.phase2) * (lf.eddyAmpX * 0.45)) *
+          eddyScale;
+        const eddyY =
+          (Math.sin(lf.eddyFreq1 * theta + lf.phase1) * lf.eddyAmpY +
+            Math.cos(lf.eddyFreq2 * theta - lf.phase2) * (lf.eddyAmpY * 0.4)) *
+          eddyScale;
+
+        const col = (Math.floor(baseX + eddyX) + cols * 4) % cols;
+        const row = Math.round(baseY + eddyY);
+
+        const glyphIdx = Math.floor((u * lf.tumbleCycles * lf.glyphSet.length + lf.tumbleOffset) % lf.glyphSet.length);
+        const glyph = lf.glyphSet[glyphIdx];
+        put(row, col, glyph, theme.leafColors[lf.colorIdx]);
+      }
+
+      // --- LAYER 4: Storm-Plains Rolling Wheat / Grass Horizon (Bottom 24%) ---
+      const plainsDepth = Math.max(8, Math.floor(rows * 0.24));
+      const baseHorizonRow = rows - plainsDepth;
+
+      for (let c = 0; c < cols; c++) {
+        const ax = (c / cols) * Math.PI * 2;
+        const colMeta = grassColumns[c % grassColumns.length];
+
+        // Gentle rolling plain contour
+        const hillOffset = Math.round(
+          Math.sin(ax * 2 + 0.5) * 1.1 + Math.cos(ax * 4 - 0.8) * 0.6
+        );
+        const horizonRow = baseHorizonRow + hillOffset + colMeta.heightOffset;
+
+        // Traveling cold-wind gust wave sweeping across the plains (exact periodic integer harmonics)
+        const gustWave =
+          (Math.sin(ax * 3 - theta * 3 + colMeta.phaseOffset) * 0.62 +
+            Math.sin(ax * 6 - theta * 5 + 1.4) * 0.38) *
+          windGust;
+
+        for (let r = horizonRow; r < rows; r++) {
+          const depthRatio = (r - horizonRow) / Math.max(1, rows - horizonRow); // 0 at crest -> 1 at soil
+
+          if (depthRatio > 0.86) {
+            put(r, c, depthRatio > 0.94 ? "▓" : "▒", theme.earthBase);
+            continue;
+          }
+
+          // Upper stalks bend strongly with wind gusts; lower roots stay anchored
+          const flexibility = Math.max(0, 1 - depthRatio * 1.15);
+          const bend = gustWave * flexibility;
+
+          let stalkGlyph = "|";
+          let stalkColor = theme.grassShadow;
+
+          if (depthRatio < 0.16) {
+            // Delicate grass tips catching dusk amber / moonlight sheen
+            if (bend > 0.75) {
+              stalkGlyph = "~";
+              stalkColor = theme.grassCrest;
+            } else if (bend > 0.32) {
+              stalkGlyph = ")";
+              stalkColor = theme.grassHighlight;
+            } else if (bend > 0.08) {
+              stalkGlyph = "/";
+              stalkColor = theme.grassHighlight;
+            } else if (bend < -0.25) {
+              stalkGlyph = "\\";
+              stalkColor = theme.grassMid;
+            } else {
+              stalkGlyph = colMeta.tipVariant;
+              stalkColor = theme.grassMid;
+            }
+          } else {
+            // Mid-stalk grass blades
+            if (bend > 0.6) {
+              stalkGlyph = ")";
+              stalkColor = theme.grassHighlight;
+            } else if (bend > 0.22) {
+              stalkGlyph = "/";
+              stalkColor = theme.grassMid;
+            } else if (bend < -0.22) {
+              stalkGlyph = "\\";
+              stalkColor = theme.grassShadow;
+            } else {
+              stalkGlyph = depthRatio > 0.55 && c % 3 === 0 ? ":" : "|";
+              stalkColor = depthRatio > 0.5 ? theme.grassShadow : theme.grassMid;
+            }
+          }
+
+          put(r, c, stalkGlyph, stalkColor);
+        }
+      }
+
+      return grid;
+    }
+
+    // Canvas & HUD References
+    const canvas = document.getElementById("ascii-canvas");
+    const ctx = canvas.getContext("2d");
+    const wrapper = document.getElementById("canvas-wrapper");
+    const hudFrameCounter = document.getElementById("hud-frame-counter");
+    const hudSceneLabel = document.getElementById("hud-scene-label");
+    const hudGridLabel = document.getElementById("hud-grid-label");
+    const hudBrandLabel = document.getElementById("hud-brand-label");
+
+    function updateTelemetryLabels() {
+      const durSec = (state.totalFrames / state.fps).toFixed(1);
+      const padLen = String(state.totalFrames).length;
+      const fStr = String(state.currentFrame + 1).padStart(padLen, "0");
+      hudGridLabel.textContent = `${state.cols}×${state.rows} @ ${state.fps} FPS`;
+      hudFrameCounter.textContent = `Frame ${fStr} / ${state.totalFrames} · ${durSec}s`;
+
+      const badgeLoopLock = document.getElementById("badge-loop-lock");
+      const descFrameCount = document.getElementById("desc-frame-count");
+      if (badgeLoopLock) badgeLoopLock.textContent = `${state.totalFrames}f · ${durSec}s Lock`;
+      if (descFrameCount) descFrameCount.textContent = `${state.totalFrames}-frame`;
+
+      const frameSlider = document.getElementById("slider-frame");
+      if (frameSlider) {
+        frameSlider.max = String(state.totalFrames - 1);
+        frameSlider.value = String(state.currentFrame);
+      }
+    }
+
+    // Responsive monospace cell sizing
+    function getCellMetrics() {
+      const pad = window.innerWidth < 640 ? 12 : 24;
+      const availableW = Math.max(280, wrapper.clientWidth - pad);
+      const cellW = Math.max(2.1, Math.min(8.2, availableW / state.cols));
+      const cellH = Math.max(4.0, Math.round(cellW / 0.55));
+      return { cellW, cellH };
+    }
+
+    // Fast HTML5 Canvas Renderer with fillStyle state caching for effortless 45–60 FPS
+    function drawGridToCanvas(grid) {
+      const theme = MOOD_PRESETS[state.presetKey];
+      const dpr = window.devicePixelRatio || 1;
+      const { cellW, cellH } = getCellMetrics();
+
+      const logicalW = Math.ceil(state.cols * cellW);
+      const logicalH = Math.ceil(state.rows * cellH);
+
+      if (canvas.width !== logicalW * dpr || canvas.height !== logicalH * dpr) {
+        canvas.width = logicalW * dpr;
+        canvas.height = logicalH * dpr;
+        canvas.style.width = `${logicalW}px`;
+        canvas.style.height = `${logicalH}px`;
+      }
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      // Paint twilight sky vertical gradient
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, logicalH);
+      skyGrad.addColorStop(0, `rgb(${theme.skyTop.join(",")})`);
+      skyGrad.addColorStop(0.78, `rgb(${theme.skyHorizon.join(",")})`);
+      skyGrad.addColorStop(1, theme.earthBase);
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, logicalW, logicalH);
+
+      const fontSize = Math.max(5.5, Math.floor(cellH * 0.86));
+      ctx.font = `500 ${fontSize}px "JetBrains Mono", monospace`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+
+      let activeFill = "";
+      for (let r = 0; r < state.rows; r++) {
+        const y = r * cellH + cellH * 0.52;
+        const row = grid[r];
+        for (let c = 0; c < state.cols; c++) {
+          const cell = row[c];
+          if (cell.c === " ") continue;
+          if (cell.rgb !== activeFill) {
+            activeFill = cell.rgb;
+            ctx.fillStyle = activeFill;
+          }
+          ctx.fillText(cell.c, c * cellW + cellW * 0.5, y);
+        }
+      }
+
+      ctx.restore();
+      updateTelemetryLabels();
+    }
+
+    // Main RequestAnimationFrame Loop (45 FPS default)
+    function animationLoop(timestamp) {
+      if (state.isPlaying) {
+        const frameDuration = 1000 / state.fps;
+        if (timestamp - state.lastTimestamp >= frameDuration) {
+          state.lastTimestamp = timestamp;
+          const grid = computeFrameGrid(state.currentFrame);
+          drawGridToCanvas(grid);
+          state.currentFrame = (state.currentFrame + 1) % state.totalFrames;
+        }
+      }
+      requestAnimationFrame(animationLoop);
+    }
+
+    function renderImmediate() {
+      const grid = computeFrameGrid(state.currentFrame);
+      drawGridToCanvas(grid);
+    }
+
+    // Non-blocking Toast Banner (replaces alert())
+    let toastTimeout = null;
+    function showToast(message, persist = false) {
+      const box = document.getElementById("toast-box");
+      const text = document.getElementById("toast-text");
+      text.textContent = message;
+      box.classList.remove("opacity-0", "translate-y-2");
+      box.classList.add("opacity-100", "translate-y-0");
+
+      clearTimeout(toastTimeout);
+      if (!persist) {
+        toastTimeout = setTimeout(() => {
+          box.classList.add("opacity-0", "translate-y-2");
+          box.classList.remove("opacity-100", "translate-y-0");
+        }, 3000);
+      }
+    }
+
+    function downloadFile(filename, content, mimeType) {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    // Non-blocking chunked frame baker so 360–450 frames never freeze the UI
+    function bakeFramesAsync(onComplete) {
+      if (state.isExporting) return;
+      state.isExporting = true;
+
+      const total = state.totalFrames;
+      const frames = new Array(total);
+      let idx = 0;
+      const chunkSize = 30;
+
+      function processChunk() {
+        const end = Math.min(total, idx + chunkSize);
+        for (; idx < end; idx++) {
+          frames[idx] = computeFrameGrid(idx);
+        }
+        showToast(`Baking frames: ${idx} / ${total}...`, true);
+
+        if (idx < total) {
+          setTimeout(processChunk, 0);
+        } else {
+          state.isExporting = false;
+          onComplete(frames);
+        }
+      }
+
+      setTimeout(processChunk, 0);
+    }
+
+    // EXPORT 1: Seamless JSON Frames for Slint GUI / Python Rich TUI
+    function exportJsonFrames() {
+      bakeFramesAsync((frames) => {
+        const payload = {
+          cols: state.cols,
+          rows: state.rows,
+          fps: state.fps,
+          totalFrames: state.totalFrames,
+          preset: MOOD_PRESETS[state.presetKey].name,
+          brandMode: state.brandMode,
+          frames
+        };
+
+        downloadFile(
+          "coldwind_ascii_frames.json",
+          JSON.stringify(payload),
+          "application/json"
+        );
+        showToast(`Exported ${state.totalFrames} frames (${state.cols}×${state.rows}) → coldwind_ascii_frames.json`);
+      });
+    }
+
+    // EXPORT 2: Standalone CSS-Keyframed Animated SVG for GitHub README.md
+    function exportAnimatedSvg() {
+      bakeFramesAsync((frames) => {
+        const theme = MOOD_PRESETS[state.presetKey];
+        const total = state.totalFrames;
+        const cellW = 6.2;
+        const cellH = 11.2;
+        const padX = 14;
+        const padY = 14;
+        const svgW = Math.ceil(state.cols * cellW + padX * 2);
+        const svgH = Math.ceil(state.rows * cellH + padY * 2);
+        const totalSeconds = (total / state.fps).toFixed(2);
+
+        const escapeXml = (str) =>
+          str
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+
+        const layerChunks = [];
+
+        for (let f = 0; f < total; f++) {
+          const grid = frames[f];
+          const delay = ((f / total) * parseFloat(totalSeconds)).toFixed(3);
+          const rowsMarkup = [];
+
+          for (let r = 0; r < state.rows; r++) {
+            const y = (padY + r * cellH + 8.5).toFixed(1);
+            const row = grid[r];
+
+            // Run-length compress adjacent same-color characters
+            const runs = [];
+            let curr = null;
+
+            for (let c = 0; c < state.cols; c++) {
+              const cell = row[c];
+              if (!curr || curr.rgb !== cell.rgb) {
+                if (curr) runs.push(curr);
+                curr = { rgb: cell.rgb, text: cell.c };
+              } else {
+                curr.text += cell.c;
+              }
+            }
+            if (curr) runs.push(curr);
+
+            if (runs.length === 1 && runs[0].text.trim() === "") continue;
+
+            const tspans = runs
+              .map((run) =>
+                run.text.trim() === ""
+                  ? `<tspan>${escapeXml(run.text)}</tspan>`
+                  : `<tspan fill="${run.rgb}">${escapeXml(run.text)}</tspan>`
+              )
+              .join("");
+
+            rowsMarkup.push(`<text x="${padX}" y="${y}" xml:space="preserve">${tspans}</text>`);
+          }
+
+          layerChunks.push(`<g class="cw-f" style="animation-delay:-${delay}s">${rowsMarkup.join("")}</g>`);
+        }
+
+        const activePct = (100 / total).toFixed(3);
+        const topHex = lerpRgbHex(theme.skyTop, theme.skyTop, 0);
+        const horHex = lerpRgbHex(theme.skyHorizon, theme.skyHorizon, 0);
+        const closeStyle = "<" + "/style>";
+        const closeSvg = "<" + "/svg>";
+
+        const svgDoc = [
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}">`,
+          `  <defs>`,
+          `    <linearGradient id="cw-sky" x1="0" y1="0" x2="0" y2="1">`,
+          `      <stop offset="0%" stop-color="${topHex}" />`,
+          `      <stop offset="78%" stop-color="${horHex}" />`,
+          `      <stop offset="100%" stop-color="${theme.earthBase}" />`,
+          `    </linearGradient>`,
+          `  </defs>`,
+          `  <style>`,
+          `    text { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10.2px; font-weight: 500; }`,
+          `    .cw-f { opacity: 0; animation: cw-loop ${totalSeconds}s steps(1, end) infinite; }`,
+          `    @keyframes cw-loop { 0% { opacity: 1; } ${activePct}% { opacity: 0; } 100% { opacity: 0; } }`,
+          `  ${closeStyle}`,
+          `  <rect width="100%" height="100%" rx="12" fill="url(#cw-sky)" stroke="#1e293b" stroke-width="1.2" />`,
+          layerChunks.join("\n"),
+          closeSvg
+        ].join("\n");
+
+        downloadFile("coldwind_kyoto_banner.svg", svgDoc, "image/svg+xml");
+        showToast(`Exported ${total}-frame SVG → coldwind_kyoto_banner.svg`);
+      });
+    }
+
+    // EXPORT 3: Copy Plain ASCII Text Frame (iframe-safe)
+    function copyCurrentFrame() {
+      const grid = computeFrameGrid(state.currentFrame);
+      const asciiText = grid
+        .map((row) => row.map((cell) => cell.c).join(""))
+        .join("\n");
+
+      const helper = document.getElementById("clipboard-helper");
+      helper.value = asciiText;
+      helper.select();
+      document.execCommand("copy");
+      showToast(`Copied Frame ${state.currentFrame + 1} plain ASCII text to clipboard!`);
+    }
+
+    // Wire Up All Studio Controls
+    function initControls() {
+      // Loop Frame Count Selector (270 / 360 / 450)
+      document.querySelectorAll(".frames-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const oldTotal = state.totalFrames;
+          const newTotal = Number(btn.dataset.frames);
+          const ratio = state.currentFrame / oldTotal;
+          state.totalFrames = newTotal;
+          state.currentFrame = Math.floor(ratio * newTotal) % newTotal;
+
+          document.querySelectorAll(".frames-btn").forEach((b) => {
+            b.className =
+              b === btn
+                ? "frames-btn px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/35 transition cursor-pointer"
+                : "frames-btn px-2 py-1 rounded-md text-slate-400 hover:text-slate-200 border border-transparent transition cursor-pointer";
+          });
+          renderImmediate();
+        });
+      });
+
+      // Grid Resolution Switcher
+      document.querySelectorAll(".res-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const [cStr, rStr] = btn.dataset.res.split("x");
+          state.cols = Number(cStr);
+          state.rows = Number(rStr);
+
+          document.querySelectorAll(".res-btn").forEach((b) => {
+            b.className =
+              b === btn
+                ? "res-btn px-2 py-1 rounded-md bg-sky-500/15 text-sky-300 border border-sky-500/35 transition cursor-pointer"
+                : "res-btn px-2 py-1 rounded-md text-slate-400 hover:text-slate-200 border border-transparent transition cursor-pointer";
+          });
+          renderImmediate();
+        });
+      });
+
+      // Collapsible HUD Toggle
+      const btnToggleHud = document.getElementById("btn-toggle-hud");
+      const controlsHud = document.getElementById("controls-hud");
+      btnToggleHud.addEventListener("click", () => {
+        state.hudVisible = !state.hudVisible;
+        if (state.hudVisible) {
+          controlsHud.classList.remove("hidden");
+          btnToggleHud.textContent = "Hide UI";
+        } else {
+          controlsHud.classList.add("hidden");
+          btnToggleHud.textContent = "Show UI";
+        }
+        renderImmediate();
+      });
+
+      // Mood Preset Buttons
+      document.querySelectorAll(".preset-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.presetKey = btn.dataset.preset;
+          hudSceneLabel.textContent = MOOD_PRESETS[state.presetKey].name;
+
+          document.querySelectorAll(".preset-btn").forEach((b) => {
+            b.className =
+              b === btn
+                ? "preset-btn px-2.5 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/35 transition cursor-pointer"
+                : "preset-btn px-2.5 py-1.5 rounded-lg bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer";
+          });
+          renderImmediate();
+        });
+      });
+
+      // Brand Display Mode Buttons
+      const brandLabelMap = {
+        wordmark: "Tethered AI Banner",
+        minimal: "Minimal Tag",
+        scenery: "Pure Scenery"
+      };
+      document.querySelectorAll(".brand-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.brandMode = btn.dataset.brand;
+          hudBrandLabel.textContent = brandLabelMap[state.brandMode];
+
+          document.querySelectorAll(".brand-btn").forEach((b) => {
+            b.className =
+              b === btn
+                ? "brand-btn px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-600/80 transition cursor-pointer"
+                : "brand-btn px-2.5 py-1.5 rounded-lg bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 transition cursor-pointer";
+          });
+          renderImmediate();
+        });
+      });
+
+      // Playback Controls
+      const btnPlayPause = document.getElementById("btn-play-pause");
+      const iconPlayPause = document.getElementById("icon-play-pause");
+      const labelPlayPause = document.getElementById("label-play-pause");
+
+      btnPlayPause.addEventListener("click", () => {
+        state.isPlaying = !state.isPlaying;
+        iconPlayPause.textContent = state.isPlaying ? "❚❚" : "▶";
+        labelPlayPause.textContent = state.isPlaying ? "Pause" : "Play";
+      });
+
+      document.getElementById("btn-step").addEventListener("click", () => {
+        state.isPlaying = false;
+        iconPlayPause.textContent = "▶";
+        labelPlayPause.textContent = "Play";
+        state.currentFrame = (state.currentFrame + 1) % state.totalFrames;
+        renderImmediate();
+      });
+
+      document.getElementById("slider-frame").addEventListener("input", (e) => {
+        state.isPlaying = false;
+        iconPlayPause.textContent = "▶";
+        labelPlayPause.textContent = "Play";
+        state.currentFrame = Number(e.target.value);
+        renderImmediate();
+      });
+
+      // Atmospheric Physics Sliders
+      document.getElementById("slider-fps").addEventListener("input", (e) => {
+        state.fps = Number(e.target.value);
+        document.getElementById("val-fps").textContent = `${state.fps} FPS`;
+        updateTelemetryLabels();
+      });
+
+      document.getElementById("slider-wind").addEventListener("input", (e) => {
+        state.windGust = Number(e.target.value);
+        document.getElementById("val-wind").textContent = `${state.windGust.toFixed(2).replace(/\.00$/, ".0")}×`;
+        renderImmediate();
+      });
+
+      document.getElementById("slider-leaves").addEventListener("input", (e) => {
+        state.leafDensity = Number(e.target.value);
+        document.getElementById("val-leaves").textContent = `${state.leafDensity}`;
+        renderImmediate();
+      });
+
+      document.getElementById("slider-clouds").addEventListener("input", (e) => {
+        state.cloudCover = Number(e.target.value);
+        document.getElementById("val-clouds").textContent = `${state.cloudCover}%`;
+        renderImmediate();
+      });
+
+      // Export Buttons
+      document.getElementById("btn-export-json").addEventListener("click", exportJsonFrames);
+      document.getElementById("btn-export-svg").addEventListener("click", exportAnimatedSvg);
+      document.getElementById("btn-copy-frame").addEventListener("click", copyCurrentFrame);
+
+      window.addEventListener("resize", renderImmediate);
+    }
+
+    // Boot Engine Safely on Window Load
+    window.onload = function () {
+      try {
+        rebuildSceneEntities();
+        initControls();
+        renderImmediate();
+        requestAnimationFrame(animationLoop);
+      } catch (err) {
+        console.error("ColdWind Scenery Studio init error:", err);
+        showToast(`Engine warning: ${err.message}`, true);
+      }
+    };
+  </script>
+</body>
+</html>
